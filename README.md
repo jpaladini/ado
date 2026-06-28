@@ -3,9 +3,11 @@
 A web Azure DevOps companion — work items, PRs, pipelines + Genie analytics — hosted as a
 **Databricks App**. React (Vite) SPA + FastAPI (Python) backend in one process.
 
-See [`PLAN.md`](PLAN.md) for the full architecture and roadmap. This is the **Phase 0**
-skeleton: org/project picker proving the spine **React → FastAPI → Azure DevOps REST API**,
-running inside a Databricks App.
+See [`PLAN.md`](PLAN.md) for the full architecture and roadmap.
+
+**Implemented (Phases 0–1):** project picker + a tabbed project view with **Work Items**,
+**Pull Requests** (status filter), **Pipelines** (recent runs), and **Code** (repos + commits) —
+all read live from the Azure DevOps REST API via the FastAPI BFF, served inside a Databricks App.
 
 ```
 ado/
@@ -48,7 +50,12 @@ npm install
 npm run dev                # http://localhost:5173 (proxies /api -> :8000)
 ```
 
-Open http://localhost:5173 — you should see your ADO projects.
+Open http://localhost:5173 — pick a project and browse its work items, PRs, pipelines, and code.
+
+**Run backend tests:**
+```bash
+cd src && pip install -r requirements-dev.txt && pytest
+```
 
 ## Deploy to Databricks
 

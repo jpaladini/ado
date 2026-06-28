@@ -83,7 +83,8 @@ The MVP = Phases 0–2.
 
 - **Phase 0 — Foundation**: Databricks App skeleton (React+FastAPI) deployable via Asset
   Bundle to Free Edition; ADO auth (PAT secret); ADO API client; org/project picker.
-- **Phase 1 — Read parity**: work items board, PR list, pipeline runs, commits (matches the mobile app).
+- **Phase 1 — Read parity** ✅: work items board, PR list (status filter), pipeline runs,
+  repos + commits — tabbed per project. Backend parsing covered by tests.
 - **Phase 2 — Write / CRUD (in MVP)**: create/edit work items, comment, approve/abandon PRs,
   queue/cancel runs. Every write goes through the FastAPI BFF with optimistic UI + rollback.
 - **Phase 3 — Analytics**: OData→Delta ingest job; Genie Space; DORA dashboards
