@@ -64,6 +64,23 @@ Create three variable groups (Pipelines → Library): `databricks-dev`, `databri
 
 The deploy pipeline auto-selects the group matching the branch.
 
+### 2b. (Free Edition / no service principal) — PAT auth alternative
+If a workspace can't issue an SP OAuth secret (e.g. Free Edition), authenticate the
+pipeline with a **personal access token** instead. The Databricks CLI uses PAT auth when
+`DATABRICKS_TOKEN` + `DATABRICKS_HOST` are set.
+
+- In the variable group, replace `DATABRICKS_CLIENT_ID` / `DATABRICKS_CLIENT_SECRET` with a
+  single secret variable **`DATABRICKS_TOKEN`** (a Databricks PAT from
+  *Settings → Developer → Access tokens*). Keep `DATABRICKS_HOST`.
+- In `azure-pipelines.yml`, change the deploy step's `env:` block to:
+  ```yaml
+      env:
+        DATABRICKS_HOST: $(DATABRICKS_HOST)
+        DATABRICKS_TOKEN: $(DATABRICKS_TOKEN)
+  ```
+This is fine for personal/dev CI; prefer the service principal for corporate stg/prod
+(no human-owned token, revocable, least-privilege).
+
 ### 3. Register the pipelines
 - Create a pipeline from `azure-pipelines.yml` (the deploy pipeline).
 - Create a pipeline from `azure-pipelines-validate.yml`, then add it as a **Build
