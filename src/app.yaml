@@ -1,17 +1,21 @@
 # Databricks App entrypoint.
 # The app must listen on the port Databricks injects via DATABRICKS_APP_PORT
 # (serve.py reads it; defaults to 8000 for local dev).
+#
+# This file is identical across dev/stg/prod. All environment-specific config
+# comes from the per-workspace `ado` secret scope (see databricks.yml), so there
+# are NO literal values here to edit per environment.
 command:
   - "python"
   - "serve.py"
 
 env:
-  # Azure DevOps org base URL, e.g. https://dev.azure.com/my-org
+  # Azure DevOps org base URL, e.g. https://dev.azure.com/<org>.
+  # `valueFrom` references the `ado_org_url` resource declared in databricks.yml.
   - name: ADO_ORG_URL
-    value: "https://dev.azure.com/CHANGE_ME"
+    valueFrom: ado_org_url
 
-  # ADO Personal Access Token. `valueFrom` references the `ado_pat` resource
-  # declared in databricks.yml (which maps to secret scope `ado`, key `ado_pat`).
-  # Databricks decrypts it at runtime; it is never stored in plaintext here.
+  # Azure DevOps Personal Access Token. References the `ado_pat` resource.
+  # Databricks decrypts both at runtime; neither is ever stored here in plaintext.
   - name: ADO_PAT
     valueFrom: ado_pat

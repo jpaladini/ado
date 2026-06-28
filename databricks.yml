@@ -1,26 +1,28 @@
 # Databricks Asset Bundle — deploys the ADO companion as a Databricks App.
 #
-# The workspace host comes from your Databricks CLI auth profile
-# (`databricks auth login --host https://<workspace>`), so it is NOT hardcoded
-# here — that's also what makes dev -> prod a profile swap, not a code change.
+# One target per workspace. Each target's host comes from a Databricks CLI auth
+# profile, so nothing workspace-specific is hardcoded here. Deploy with the
+# matching profile, e.g.:
 #
-#   Dev  -> personal Free Edition workspace
-#   Prod -> corporate workspace (paid; runs continuously, no 24h app cap)
+#   databricks bundle deploy -t dev  -p dev
+#   databricks bundle deploy -t stg  -p stg
+#   databricks bundle deploy -t prod -p prod
 #
-# Setup is automated by scripts/setup.sh. Manual flow:
-#   databricks bundle deploy -t dev
-#   databricks bundle run ado_app -t dev
+# All environment-specific config (ADO org URL + PAT) lives in a per-workspace
+# secret scope `ado` (keys: ado_org_url, ado_pat). The bundle and app.yaml are
+# identical across environments — only the secrets differ per workspace. That is
+# what makes dev/stg/prod a profile + secret swap, not a code change.
 bundle:
   name: ado
 
 targets:
   dev:
-    mode: development
+    mode: development   # name-prefixed + isolated per user
     default: true
-    # host resolved from the active CLI profile (or `-p <profile>`)
+  stg:
+    mode: production
   prod:
     mode: production
-    # deploy with the corporate profile: databricks bundle deploy -t prod -p <corp>
 
 resources:
   apps:
@@ -29,8 +31,13 @@ resources:
       description: "Azure DevOps companion — work items, PRs, pipelines, + Genie analytics"
       source_code_path: ./src
       resources:
-        # Referenced by `valueFrom: ado_pat` in src/app.yaml. Grants the app's
-        # service principal READ on secret scope `ado`, key `ado_pat`.
+        # Referenced by `valueFrom:` in src/app.yaml. Each points at the `ado`
+        # secret scope in *this* workspace, so values differ per environment.
+        - name: ado_org_url
+          secret:
+            scope: ado
+            key: ado_org_url
+            permission: READ
         - name: ado_pat
           secret:
             scope: ado
