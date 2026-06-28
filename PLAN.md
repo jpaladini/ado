@@ -1,121 +1,129 @@
-# ADO — Web-First Azure DevOps Companion
+# ADO — Azure DevOps Companion on Databricks Apps
 
-> Planning document. Status: **draft for review.** Defaults below are recommendations, not commitments — flag anything to change.
+> Planning document. Architecture **locked** for the core stack; scope items in §6 still open.
 
 ## 1. What we're building
 
-A **web-first Azure DevOps companion** inspired by the unofficial mobile client
+A **web Azure DevOps companion**, inspired by the unofficial mobile client
 [PurpleSoftSrl/azure_devops_app](https://github.com/PurpleSoftSrl/azure_devops_app)
-(Flutter; auth via Microsoft account or PAT; work items, pull requests, pipelines, commits).
+(Flutter; auth via Microsoft account or PAT; work items, PRs, pipelines, commits).
 
-We reimagine it for the browser and go beyond the original in two ways:
+We reimagine it for the browser and go beyond the original:
 
 1. **CRUD workflow** — not just viewing ADO data, but creating/editing work items,
    commenting, approving/abandoning PRs, queuing pipeline runs.
-2. **Analytics** — a dashboard surface (DORA-style delivery metrics) plus
-   **natural-language Q&A via Databricks Genie**, which the mobile app never had.
+2. **Analytics** — DORA-style delivery dashboards plus **natural-language Q&A via
+   Databricks Genie**, which the mobile app never had.
 
-One-line pitch: *Manage your Azure DevOps work and understand your delivery — from one web app.*
+Hosting is **Databricks Apps** (a hard constraint — corporate allows Databricks only,
+no Vercel/external PaaS). Dev runs on a personal **Free Edition** workspace; production
+will run on the **corporate** workspace and repo.
 
 ## 2. The core architectural decision: two data planes
 
-ADO functionality splits into two planes. Keeping them separate is the central design choice.
+ADO functionality splits into two planes. Both are served by the **one FastAPI backend**
+running inside the Databricks App. Keeping them separate is the central design choice.
 
 | Plane | Source | Nature | Powers |
 |---|---|---|---|
-| **Operational** | Azure DevOps REST API (live) | Low-latency, read **+ write** | Work items, PRs, pipelines, commits — the CRUD tool |
-| **Analytical** | ADO data ingested into a lakehouse/warehouse | Batch, read-only, aggregate | Dashboards + Genie natural-language Q&A |
+| **Operational** | Azure DevOps REST API (live, via `httpx`) | Low-latency, read **+ write** | Work items, PRs, pipelines, commits — the CRUD tool |
+| **Analytical** | ADO data ingested to Delta in Unity Catalog | Batch, read-only, aggregate | Dashboards + Genie natural-language Q&A |
 
-- The **operational plane** talks directly to the live ADO REST API. No copy of ADO
-  data is stored; we only persist app-specific state (saved views, favorites, prefs).
-- The **analytical plane** requires ADO history in a queryable store. Genie answers
-  only over **Databricks Unity Catalog**, so this means ingesting ADO's
-  [Analytics OData feed](https://learn.microsoft.com/en-us/azure/devops/report/)
-  into Delta tables, then pointing a Genie Space at them.
+- The **operational plane** calls the live ADO REST API. No copy of ADO data is stored;
+  we persist only app state (saved views, favorites, prefs).
+- The **analytical plane** runs over ADO history in Delta. A scheduled Databricks **job**
+  pulls the ADO [Analytics OData feed](https://learn.microsoft.com/en-us/azure/devops/report/)
+  into Delta tables; a **Genie Space** points at them; the backend calls the
+  [Genie Conversation API](https://docs.databricks.com/aws/en/genie/conversation-api)
+  (not the iframe — that needs every viewer to hold Databricks access and can't be styled)
+  and renders results in our own UI.
 
-### Analytics is pluggable (the Databricks fork)
+**Resilience:** the operational plane never depends on Databricks SQL/Genie, so the app
+stays fully usable when the warehouse is quota-capped, asleep, or being migrated.
 
-| Path | When | How |
-|---|---|---|
-| **Databricks Genie** (default) | On Databricks, or willing to add it | OData → Delta → Genie Space; embed via iframe (GA 2026) or Conversation API |
-| **Non-Databricks fallback** | Not on Databricks | Mirror ADO data → Postgres; NL→SQL with the Claude API; charts in-app |
+## 3. Stack (locked)
 
-We build the analytics surface behind an interface so the backing engine can swap
-without touching the UI.
+```
+Databricks App
+├─ React (Vite + TypeScript + Tailwind + shadcn/ui)   ← the UI
+│    └─ TanStack Query → calls our FastAPI
+└─ FastAPI (Python + Databricks SDK)                   ← one backend, two planes
+   ├─ Operational → Azure DevOps REST API (httpx)      ← live CRUD
+   └─ Analytical  → SQL warehouse + Genie Conversation API
++ Databricks Job: ADO OData → Delta (scheduled ingest)
++ Databricks Asset Bundle: dev (Free Edition) / prod (corporate) targets
+```
 
-**Confirmed:** Databricks is available, but development uses a personal
-**Free Edition** workspace (see §8). Integration is via the **Genie Conversation
-API through our BFF** — not the iframe (which requires every viewer to hold
-Databricks access and can't be styled). Our backend holds one token, calls Genie,
-and renders results in our own UI.
+- **Frontend**: React (Vite) SPA — chosen over Streamlit for CRUD polish; over Next.js
+  because SSR/edge buys nothing inside a Databricks App.
+- **Backend**: FastAPI (Python) — first-class Databricks SDK integration for Genie + SQL +
+  Unity Catalog, and the BFF to the ADO REST API in one process.
+- **Auth**: Databricks App provides the signed-in Databricks identity. ADO is authenticated
+  separately — **PAT in a Databricks secret** for solo dev, **Entra ID OAuth** for corporate
+  (ADO and Databricks likely share the tenant). PAT fallback mirrors the original app.
+- **App state**: **Lakebase** (Databricks managed Postgres) on corporate; for Free Edition
+  dev, start with a Delta table or minimal state (Lakebase availability there is TBD).
+- **Deploy/config**: **Databricks Asset Bundles** — nothing hardcoded; workspace URL,
+  warehouse/Genie Space IDs, and tokens come from target config + secrets.
 
-## 3. Recommended stack (web-first, single codebase)
+## 4. Migration: personal/Free → corporate
 
-- **App**: Next.js 15 (App Router) + TypeScript + Tailwind + shadcn/ui; TanStack Query.
-- **Auth**: **Microsoft Entra ID** (OAuth/OIDC) via Auth.js, with **PAT fallback**
-  (parity with the original). Entra is the natural fit and unlocks Teams/M365 SSO later.
-- **Backend**: Next.js Route Handlers as a BFF proxying the ADO REST API — keeps tokens
-  server-side, centralizes pagination/rate-limit handling.
-- **App-state DB**: small Postgres (Neon/Supabase) for saved views, favorites, prefs.
-  *Not* a mirror of ADO data.
-- **Analytics**: Databricks (Genie Space + embedded dashboards) or the Postgres/Claude
-  fallback, behind a common interface.
-- **Deploy**: Vercel.
+This is designed in from day one, not bolted on later.
 
-## 4. Cross-platform: build once, shell everywhere
-
-The web app is the single source of truth; other surfaces wrap or embed it.
-
-1. **Web on Vercel** — primary. ✅
-2. **Microsoft Teams tab / M365 app** — strongest bonus. Same codebase, Entra SSO,
-   and DevOps teams already live in Teams. Highest value-to-effort.
-3. **Mac app via Tauri** — cheap wrapper; menu-bar/offline niceties. Low effort.
-4. **Databricks App (React)** — ~~natural analytics host~~ **deprioritized**: Free Edition
-   caps apps at 24h of runtime per deploy (§8), so it can't host anything always-on.
-   Revisit only on a paid workspace.
+- **Asset Bundle targets** (`databricks.yml`): `dev` → personal Free Edition,
+  `prod` → corporate. Move repos by changing the target, not the code.
+- **Zero hardcoding**: all workspace/warehouse/Genie/token values via target config + secrets.
+- **Native CI/CD**: `databricks bundle deploy -t {dev|prod}` is the standard corporate path,
+  so it passes review.
 
 ## 5. Phased build
 
-- **Phase 0 — Foundation**: Next.js scaffold, Entra + PAT auth, ADO API client, org/project picker.
+- **Phase 0 — Foundation**: Databricks App skeleton (React+FastAPI) deployable via Asset
+  Bundle to Free Edition; ADO auth (PAT secret); ADO API client; org/project picker.
 - **Phase 1 — Read parity**: work items board, PR list, pipeline runs, commits (matches the mobile app).
 - **Phase 2 — Write / CRUD**: create/edit work items, comment, approve/abandon PRs, queue/cancel runs.
-- **Phase 3 — Analytics**: DORA dashboards (lead time, deploy frequency, change-fail rate, MTTR) + embedded Genie.
-- **Phase 4 — Surfaces**: Teams tab, then Tauri Mac. (Databricks App if applicable.)
+- **Phase 3 — Analytics**: OData→Delta ingest job; Genie Space; DORA dashboards
+  (lead time, deploy frequency, change-fail rate, MTTR) + NL-Q&A panel via Conversation API.
+- **Phase 4 — Surfaces (optional)**: Teams tab embedding the app; Tauri Mac wrapper.
 
 ## 6. Open decisions
 
-1. ~~Databricks availability~~ **Resolved**: on Databricks (Free Edition for dev). Genie via Conversation API; analytics stays pluggable. See §7.
-2. **Write-back scope for MVP** — read-only / core write-back / full CRUD+automation. *Default: read parity (P1) then core write-back (P2).*
-3. **Bonus surfaces to plan in vs. defer** — *Default: plan Teams/M365 in; note Mac + Databricks App as follow-ons.*
-4. **Stack confirmation** — Next.js/React assumed. Push back if you prefer otherwise.
+1. ~~Databricks availability~~ **Resolved**: Databricks-only host. Genie via Conversation API.
+2. ~~Stack~~ **Resolved**: React (Vite) + FastAPI (Python) on Databricks Apps.
+3. **MVP write-back scope** — read-only / **core write-back** / full CRUD + automation.
+   *Default: read parity (P1) → core write-back (P2).*
+4. **Bonus surfaces** — *Default: note Teams/M365 + Mac as optional P4; web (the Databricks
+   App) is the product.*
 
-## 7. Databricks Free Edition constraints
+## 7. Databricks Free Edition constraints (dev only)
 
-Development targets a personal **Free Edition** workspace. It's great for prototyping
-the analytics plane, but is **not** a production backend.
+Free Edition is great for prototyping; it is **not** a production backend.
 
 | Capability | Free Edition limit | Consequence |
 |---|---|---|
-| Databricks Apps | ≤3, each stops 24h after start/redeploy | Don't host the app here; web stays on Vercel |
+| Databricks Apps | ≤3, each stops 24h after start/redeploy | Solo-dev restart annoyance only; corporate (paid) runs continuously |
 | SQL warehouse (Genie needs one) | One, 2X-Small only | Enough for personal/dev Genie |
 | Genie Conversation API | Best-effort, ~5 questions/min | Fine for dev, not production throughput |
-| Usage quota | Exceed → compute off rest of day/month | Dev-fragile; analytics must degrade gracefully |
-| Commercial use | **Non-commercial only** | Swap to paid workspace before any real product |
+| Usage quota | Exceed → compute off rest of day/month | Analytics must degrade gracefully |
+| Commercial use | **Non-commercial only** | Must move to corporate workspace before any real/corporate use |
 | Other | One workspace/metastore, no SLA, deleted after prolonged inactivity | Treat as disposable dev infra |
 
-**Design rules that follow:**
-- Databricks connection is **swappable config** (host, warehouse ID, Genie Space ID,
-  token) → Free → paid is a config change, not a rewrite.
-- Operational CRUD plane never depends on Databricks, so the app stays fully usable
-  when the warehouse is quota-capped, asleep, or being migrated.
-- Genie via **Conversation API + BFF** (not iframe); works on Free Edition with a PAT.
+## 8. Risks to verify early
 
-## 8. References
+- **Network egress**: the app calls `dev.azure.com` from inside Databricks. Free Edition
+  serverless should allow it; **corporate** Databricks often restricts outbound — confirm
+  the corporate workspace can reach the ADO org (the whole operational plane depends on it).
+- **ADO flavor**: Azure DevOps Services (cloud) vs Server (on-prem) changes API base URLs/auth.
+- **Lakebase on Free Edition**: TBD; have a Delta/minimal-state fallback for dev.
+- **Commercial-use license** (see §7): do not let real corporate use run on Free Edition.
+
+## 9. References
 
 - Reference app: https://github.com/PurpleSoftSrl/azure_devops_app
 - [Genie Conversation API](https://docs.databricks.com/aws/en/genie/conversation-api)
-- [Embed a Genie Space in an external app](https://docs.databricks.com/aws/en/genie/embed)
+- [Add a Genie Space resource to a Databricks app](https://docs.databricks.com/aws/en/dev-tools/databricks-apps/genie)
 - [Databricks Apps](https://docs.databricks.com/aws/en/dev-tools/databricks-apps/)
+- [Databricks Asset Bundles](https://docs.databricks.com/aws/en/dev-tools/bundles/)
 - [Databricks Free Edition limitations](https://docs.databricks.com/aws/en/getting-started/free-edition-limitations)
 - [Azure DevOps REST API](https://learn.microsoft.com/en-us/rest/api/azure/devops/)
 - [Azure DevOps Analytics (OData)](https://learn.microsoft.com/en-us/azure/devops/report/)
