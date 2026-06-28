@@ -78,10 +78,14 @@ This is designed in from day one, not bolted on later.
 
 ## 5. Phased build
 
+**Write-back is in the MVP** — it's the core "workflow tool" value, not a fast-follow.
+The MVP = Phases 0–2.
+
 - **Phase 0 — Foundation**: Databricks App skeleton (React+FastAPI) deployable via Asset
   Bundle to Free Edition; ADO auth (PAT secret); ADO API client; org/project picker.
 - **Phase 1 — Read parity**: work items board, PR list, pipeline runs, commits (matches the mobile app).
-- **Phase 2 — Write / CRUD**: create/edit work items, comment, approve/abandon PRs, queue/cancel runs.
+- **Phase 2 — Write / CRUD (in MVP)**: create/edit work items, comment, approve/abandon PRs,
+  queue/cancel runs. Every write goes through the FastAPI BFF with optimistic UI + rollback.
 - **Phase 3 — Analytics**: OData→Delta ingest job; Genie Space; DORA dashboards
   (lead time, deploy frequency, change-fail rate, MTTR) + NL-Q&A panel via Conversation API.
 - **Phase 4 — Surfaces (optional)**: Teams tab embedding the app; Tauri Mac wrapper.
@@ -90,8 +94,8 @@ This is designed in from day one, not bolted on later.
 
 1. ~~Databricks availability~~ **Resolved**: Databricks-only host. Genie via Conversation API.
 2. ~~Stack~~ **Resolved**: React (Vite) + FastAPI (Python) on Databricks Apps.
-3. **MVP write-back scope** — read-only / **core write-back** / full CRUD + automation.
-   *Default: read parity (P1) → core write-back (P2).*
+3. ~~MVP write-back scope~~ **Resolved**: core write-back is **in the MVP** (P0–P2).
+   Full automation/bulk edits remain post-MVP.
 4. **Bonus surfaces** — *Default: note Teams/M365 + Mac as optional P4; web (the Databricks
    App) is the product.*
 
