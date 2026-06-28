@@ -5,6 +5,7 @@ is persisted locally. Auth is PAT-based (Basic auth with an empty username), whi
 mirrors the original mobile app; corporate will swap this for Entra OAuth.
 """
 import base64
+import json as jsonlib
 from typing import Any
 from urllib.parse import quote
 
@@ -58,6 +59,30 @@ class ADOClient:
             resp = await client.post(path, params=params, json=body)
             resp.raise_for_status()
             return resp.json()
+
+    async def _send(
+        self,
+        method: str,
+        path: str,
+        *,
+        body: Any = None,
+        params: dict[str, Any] | None = None,
+        content_type: str | None = None,
+    ) -> dict[str, Any]:
+        """Generic write request. Use content_type to send a non-default media
+        type (e.g. application/json-patch+json for work-item updates)."""
+        params = {"api-version": API_VERSION, **(params or {})}
+        async with self._client() as client:
+            if content_type:
+                resp = await client.request(
+                    method, path, params=params,
+                    content=jsonlib.dumps(body),
+                    headers={"Content-Type": content_type},
+                )
+            else:
+                resp = await client.request(method, path, params=params, json=body)
+            resp.raise_for_status()
+            return resp.json() if resp.content else {}
 
     # -- identity & projects --------------------------------------------------
 
@@ -146,6 +171,7 @@ class ADOClient:
                     "createdBy": _user(pr.get("createdBy")),
                     "creationDate": pr.get("creationDate"),
                     "repository": (pr.get("repository") or {}).get("name"),
+                    "repositoryId": (pr.get("repository") or {}).get("id"),
                     "sourceRef": (pr.get("sourceRefName") or "").replace("refs/heads/", ""),
                     "targetRef": (pr.get("targetRefName") or "").replace("refs/heads/", ""),
                 }
@@ -191,6 +217,47 @@ class ADOClient:
             }
             for r in data.get("value", [])
         ]
+
+    # -- writes ---------------------------------------------------------------
+
+    async def update_work_item(self, work_item_id: int, fields: dict[str, Any]) -> dict[str, Any]:
+        """PATCH work item fields via JSON Patch (e.g. {'System.State': 'Active'})."""
+        ops = [{"op": "add", "path": f"/fields/{k}", "value": v} for k, v in fields.items()]
+        return await self._send(
+            "PATCH",
+            f"/_apis/wit/workitems/{work_item_id}",
+            body=ops,
+            content_type="application/json-patch+json",
+        )
+
+    async def add_work_item_comment(self, project: str, work_item_id: int, text: str) -> dict[str, Any]:
+        proj = quote(project, safe="")
+        return await self._send(
+            "POST",
+            f"/{proj}/_apis/wit/workItems/{work_item_id}/comments",
+            body={"text": text},
+            params={"api-version": "7.1-preview.3"},
+        )
+
+    async def set_pr_vote(
+        self, project: str, repo_id: str, pr_id: int, reviewer_id: str, vote: int
+    ) -> dict[str, Any]:
+        """vote: 10 approve, 5 approve w/ suggestions, 0 reset, -5 waiting, -10 reject."""
+        proj, rid = quote(project, safe=""), quote(repo_id, safe="")
+        return await self._send(
+            "PUT",
+            f"/{proj}/_apis/git/repositories/{rid}/pullRequests/{pr_id}/reviewers/{reviewer_id}",
+            body={"vote": vote},
+        )
+
+    async def set_pr_status(self, project: str, repo_id: str, pr_id: int, status: str) -> dict[str, Any]:
+        """status: 'abandoned' or 'active' (reactivate)."""
+        proj, rid = quote(project, safe=""), quote(repo_id, safe="")
+        return await self._send(
+            "PATCH",
+            f"/{proj}/_apis/git/repositories/{rid}/pullRequests/{pr_id}",
+            body={"status": status},
+        )
 
     async def list_commits(self, project: str, repo_id: str, top: int = 25) -> list[dict[str, Any]]:
         proj = quote(project, safe="")

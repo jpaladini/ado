@@ -85,8 +85,9 @@ The MVP = Phases 0–2.
   Bundle to Free Edition; ADO auth (PAT secret); ADO API client; org/project picker.
 - **Phase 1 — Read parity** ✅: work items board, PR list (status filter), pipeline runs,
   repos + commits — tabbed per project. Backend parsing covered by tests.
-- **Phase 2 — Write / CRUD (in MVP)**: create/edit work items, comment, approve/abandon PRs,
-  queue/cancel runs. Every write goes through the FastAPI BFF with optimistic UI + rollback.
+- **Phase 2 — Write / CRUD (in MVP)** 🔨: work item state change + comments, PR
+  approve/abandon/reactivate — done, via the FastAPI BFF with query invalidation and
+  per-row error surfacing. Remaining: create work items, queue/cancel pipeline runs.
 - **Phase 3 — Analytics**: OData→Delta ingest job; Genie Space; DORA dashboards
   (lead time, deploy frequency, change-fail rate, MTTR) + NL-Q&A panel via Conversation API.
 - **Phase 4 — Surfaces (optional)**: Teams tab embedding the app; Tauri Mac wrapper.

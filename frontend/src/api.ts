@@ -28,6 +28,7 @@ export interface PullRequest {
   createdBy: string | null;
   creationDate?: string;
   repository: string | null;
+  repositoryId: string | null;
   sourceRef: string;
   targetRef: string;
 }
@@ -68,6 +69,19 @@ async function get<T>(path: string): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+async function send<T>(path: string, method: string, body?: unknown): Promise<T> {
+  const res = await fetch(path, {
+    method,
+    headers: { "Content-Type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const b = await res.json().catch(() => ({}));
+    throw new Error(b.detail ?? `Request failed (${res.status})`);
+  }
+  return res.json() as Promise<T>;
+}
+
 const enc = encodeURIComponent;
 
 export const fetchHealth = () => get<Health>("/api/health");
@@ -83,3 +97,17 @@ export const fetchRepos = (p: string) =>
   get<{ value: Repo[] }>(`/api/projects/${enc(p)}/repos`);
 export const fetchCommits = (p: string, repoId: string) =>
   get<{ value: Commit[] }>(`/api/projects/${enc(p)}/repos/${enc(repoId)}/commits`);
+
+// -- writes -------------------------------------------------------------------
+
+export const setWorkItemState = (p: string, id: number, state: string) =>
+  send(`/api/projects/${enc(p)}/workitems/${id}/state`, "PATCH", { state });
+
+export const addWorkItemComment = (p: string, id: number, text: string) =>
+  send(`/api/projects/${enc(p)}/workitems/${id}/comments`, "POST", { text });
+
+export const votePullRequest = (p: string, repoId: string, prId: number, vote: number) =>
+  send(`/api/projects/${enc(p)}/repos/${enc(repoId)}/pullrequests/${prId}/vote`, "PUT", { vote });
+
+export const setPullRequestStatus = (p: string, repoId: string, prId: number, status: string) =>
+  send(`/api/projects/${enc(p)}/repos/${enc(repoId)}/pullrequests/${prId}`, "PATCH", { status });

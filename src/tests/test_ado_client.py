@@ -117,3 +117,65 @@ async def test_repos_and_commits(client: ADOClient):
     commits = await client.list_commits("Demo", "r1")
     assert commits[0]["shortId"] == "abcdef12"
     assert commits[0]["author"] == "Ada"
+
+
+# -- writes: assert the outgoing request is constructed correctly -------------
+
+
+@pytest.fixture
+def capturing():
+    """Returns (client, captured_list). Each entry: (method, path, raw_path, headers, body)."""
+    captured: list[tuple] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        body = req.content.decode() if req.content else ""
+        captured.append((req.method, req.url.path, req.url.raw_path.decode(), dict(req.headers), body))
+        if req.url.path.endswith("/connectionData"):
+            return httpx.Response(200, json={"authenticatedUser": {"id": "user-123"}})
+        return httpx.Response(200, json={"ok": True})
+
+    c = ADOClient(org_url="https://dev.azure.com", pat="x")
+    c._client = lambda: httpx.AsyncClient(base_url=c.org_url, transport=httpx.MockTransport(handler))  # type: ignore[method-assign]
+    return c, captured
+
+
+@pytest.mark.asyncio
+async def test_update_work_item_uses_json_patch(capturing):
+    import json
+
+    client, cap = capturing
+    await client.update_work_item(42, {"System.State": "Active"})
+    method, path, _raw, headers, body = cap[-1]
+    assert method == "PATCH" and path == "/_apis/wit/workitems/42"
+    assert headers["content-type"] == "application/json-patch+json"
+    assert json.loads(body) == [{"op": "add", "path": "/fields/System.State", "value": "Active"}]
+
+
+@pytest.mark.asyncio
+async def test_add_comment_encodes_project(capturing):
+    import json
+
+    client, cap = capturing
+    await client.add_work_item_comment("My Proj", 42, "looks good")
+    method, _path, raw, _headers, body = cap[-1]
+    assert method == "POST"
+    assert "My%20Proj" in raw  # percent-encoded on the wire
+    assert json.loads(body) == {"text": "looks good"}
+
+
+@pytest.mark.asyncio
+async def test_pr_vote_and_status(capturing):
+    import json
+
+    client, cap = capturing
+    await client.set_pr_vote("Proj", "repo-1", 7, "user-123", 10)
+    method, path, _raw, _headers, body = cap[-1]
+    assert method == "PUT"
+    assert path == "/Proj/_apis/git/repositories/repo-1/pullRequests/7/reviewers/user-123"
+    assert json.loads(body) == {"vote": 10}
+
+    await client.set_pr_status("Proj", "repo-1", 7, "abandoned")
+    method, path, _raw, _headers, body = cap[-1]
+    assert method == "PATCH"
+    assert path == "/Proj/_apis/git/repositories/repo-1/pullRequests/7"
+    assert json.loads(body) == {"status": "abandoned"}
