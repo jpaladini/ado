@@ -50,33 +50,19 @@ npm run dev                # http://localhost:5173 (proxies /api -> :8000)
 
 Open http://localhost:5173 — you should see your ADO projects.
 
-## Deploy to Databricks (Free Edition)
+## Deploy to Databricks
 
-**1. Configure the bundle.** In `databricks.yml`, set the `dev` workspace `host` and the
-`ado_org_url` variable. In `src/app.yaml`, set `ADO_ORG_URL`.
+The full runbook is in **[`SETUP_DATABRICKS.md`](SETUP_DATABRICKS.md)** — automated and manual paths.
 
-**2. Store the PAT as a secret:**
+**Fast path** (from the repo root):
 ```bash
-databricks secrets create-scope ado
-databricks secrets put-secret ado ado_pat      # paste the PAT
+DBX_HOST=https://<workspace>.cloud.databricks.com \
+ADO_ORG_URL=https://dev.azure.com/<org> \
+ADO_PAT=<token> \
+./scripts/setup.sh
 ```
+This logs in, stores the PAT secret, sets the org URL, builds the frontend, deploys, and starts
+the app — then prints its URL. Re-runnable and idempotent.
 
-**3. Build the frontend** (output goes to `src/static/`):
-```bash
-cd frontend && npm install && npm run build && cd ..
-```
-
-**4. Deploy + run:**
-```bash
-databricks bundle deploy -t dev
-databricks bundle run ado_app -t dev
-```
-
-> **Free Edition notes:** apps stop ~24h after each deploy (redeploy to resume — fine for
-> solo dev), and it's **non-commercial only**. Move to the corporate workspace (`-t prod`)
-> for any real use. See `PLAN.md` §7.
-
-## Migrating to corporate
-
-Set the `prod` target's `host` in `databricks.yml`, create the `ado` secret + `ADO_ORG_URL`
-in that workspace, then `databricks bundle deploy -t prod`. No code changes.
+> **Free Edition notes:** apps stop ~24h after each deploy (just redeploy — fine for solo dev),
+> and it's **non-commercial only**. Move to the corporate workspace for real use. See `PLAN.md` §7.

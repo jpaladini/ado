@@ -10,8 +10,8 @@ env:
   - name: ADO_ORG_URL
     value: "https://dev.azure.com/CHANGE_ME"
 
-  # ADO Personal Access Token, sourced from a Databricks secret.
-  # Create it first:  databricks secrets create-scope ado
-  #                   databricks secrets put-secret ado ado_pat
+  # ADO Personal Access Token. `valueFrom` references the `ado_pat` resource
+  # declared in databricks.yml (which maps to secret scope `ado`, key `ado_pat`).
+  # Databricks decrypts it at runtime; it is never stored in plaintext here.
   - name: ADO_PAT
-    valueFrom: "ado/ado_pat"
+    valueFrom: ado_pat

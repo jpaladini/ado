@@ -1,34 +1,26 @@
 # Databricks Asset Bundle — deploys the ADO companion as a Databricks App.
 #
-# Dev  -> personal Free Edition workspace
-# Prod -> corporate workspace (paid; runs continuously, no 24h app cap)
+# The workspace host comes from your Databricks CLI auth profile
+# (`databricks auth login --host https://<workspace>`), so it is NOT hardcoded
+# here — that's also what makes dev -> prod a profile swap, not a code change.
 #
-# Deploy:  databricks bundle deploy -t dev
-# Run:     databricks bundle run ado_app -t dev
+#   Dev  -> personal Free Edition workspace
+#   Prod -> corporate workspace (paid; runs continuously, no 24h app cap)
+#
+# Setup is automated by scripts/setup.sh. Manual flow:
+#   databricks bundle deploy -t dev
+#   databricks bundle run ado_app -t dev
 bundle:
   name: ado
-
-variables:
-  ado_org_url:
-    description: "Azure DevOps org base URL, e.g. https://dev.azure.com/my-org"
-    default: "https://dev.azure.com/CHANGE_ME"
-  ado_secret_scope:
-    description: "Databricks secret scope holding the ADO PAT (key: ado_pat)"
-    default: "ado"
 
 targets:
   dev:
     mode: development
     default: true
-    workspace:
-      # Your personal Free Edition workspace URL
-      host: https://CHANGE_ME.cloud.databricks.com
-
+    # host resolved from the active CLI profile (or `-p <profile>`)
   prod:
     mode: production
-    workspace:
-      # Corporate workspace URL (set when migrating)
-      host: https://CHANGE_ME.cloud.databricks.com
+    # deploy with the corporate profile: databricks bundle deploy -t prod -p <corp>
 
 resources:
   apps:
@@ -36,3 +28,11 @@ resources:
       name: ado-companion
       description: "Azure DevOps companion — work items, PRs, pipelines, + Genie analytics"
       source_code_path: ./src
+      resources:
+        # Referenced by `valueFrom: ado_pat` in src/app.yaml. Grants the app's
+        # service principal READ on secret scope `ado`, key `ado_pat`.
+        - name: ado_pat
+          secret:
+            scope: ado
+            key: ado_pat
+            permission: READ
