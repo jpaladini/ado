@@ -38,6 +38,8 @@ Rules for handling these:
 - ❌ Do not put the PAT (or org URL) in `app.yaml`, code, or git — `app.yaml` reads them via `valueFrom`.
 - ❌ Do not change `databricks.yml` resource wiring (the `ado_org_url` + `ado_pat` secret resources are required).
 - ❌ Do not attempt to create the Genie Space — that is a human UI step (see end).
+- ❌ Do not deploy to `stg` or `prod` manually. Those flow through PR + Azure Pipelines
+  (`docs/CICD.md`). Agents/bootstrap target **`dev` only**.
 
 ## Steps (only after Step 0 inputs are in hand)
 

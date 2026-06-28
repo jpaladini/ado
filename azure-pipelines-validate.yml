@@ -1,0 +1,47 @@
+# Azure Pipelines — PR build validation (NO deploy).
+# Wire this as a Build Validation branch policy on dev/stg/prod so every PR must
+# pass: frontend build + backend tests + bundle validate, before it can merge.
+
+trigger: none   # invoked by branch policy on PRs, not by pushes
+pr: none
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  - group: databricks-dev   # only used to give `bundle validate` a host
+
+steps:
+  - checkout: self
+
+  - task: NodeTool@0
+    inputs:
+      versionSpec: "20.x"
+    displayName: Use Node 20
+
+  - script: |
+      set -euo pipefail
+      cd frontend && npm ci && npm run build
+    displayName: Build frontend
+
+  - task: UsePythonVersion@0
+    inputs:
+      versionSpec: "3.11"
+    displayName: Use Python 3.11
+
+  - script: |
+      set -euo pipefail
+      cd src
+      pip install -r requirements-dev.txt
+      pytest -q
+    displayName: Backend tests
+
+  - script: |
+      set -euo pipefail
+      curl -fsSL https://raw.githubusercontent.com/databricks/setup-cli/main/install.sh | sh
+      databricks bundle validate -t dev
+    displayName: Validate bundle
+    env:
+      DATABRICKS_HOST: $(DATABRICKS_HOST)
+      DATABRICKS_CLIENT_ID: $(DATABRICKS_CLIENT_ID)
+      DATABRICKS_CLIENT_SECRET: $(DATABRICKS_CLIENT_SECRET)

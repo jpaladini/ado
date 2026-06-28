@@ -76,3 +76,7 @@ the app — then prints its URL. Re-runnable and idempotent.
 
 > **Free Edition notes:** apps stop ~24h after each deploy (just redeploy — fine for solo dev),
 > and it's **non-commercial only**. Move to the corporate workspace for real use. See `PLAN.md` §7.
+
+**Promotion (dev → stg → prod):** each protected branch deploys to its own workspace via
+Azure Pipelines on merge. Config is per-workspace secrets, so branches differ only in code.
+See **[`docs/CICD.md`](docs/CICD.md)**.

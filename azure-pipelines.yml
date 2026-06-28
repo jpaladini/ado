@@ -1,0 +1,77 @@
+# Azure Pipelines — deploy the ADO companion to the matching Databricks workspace
+# on merge to a protected branch. Branch name == bundle target == environment.
+#
+#   merge to dev   -> databricks bundle deploy -t dev   (dev workspace)
+#   merge to stg   -> databricks bundle deploy -t stg   (stg workspace)
+#   merge to prod  -> databricks bundle deploy -t prod  (prod workspace)
+#
+# Auth is per-environment via a service principal (OAuth M2M). Each environment's
+# credentials live in an Azure DevOps *variable group* (see docs/CICD.md):
+#   databricks-dev / databricks-stg / databricks-prod, each with:
+#     DATABRICKS_HOST          (workspace URL)
+#     DATABRICKS_CLIENT_ID     (service principal application ID)
+#     DATABRICKS_CLIENT_SECRET (secret variable — OAuth secret)
+#
+# PR build validation (no deploy) is configured via a branch policy, not here.
+
+trigger:
+  branches:
+    include:
+      - dev
+      - stg
+      - prod
+
+pr: none  # PR validation is wired via branch policy -> validate-only pipeline
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  - name: targetEnv
+    value: $(Build.SourceBranchName)   # resolves to dev | stg | prod
+  # Pull the correct credentials for this branch's environment.
+  - ${{ if eq(variables['Build.SourceBranchName'], 'dev') }}:
+      - group: databricks-dev
+  - ${{ if eq(variables['Build.SourceBranchName'], 'stg') }}:
+      - group: databricks-stg
+  - ${{ if eq(variables['Build.SourceBranchName'], 'prod') }}:
+      - group: databricks-prod
+
+steps:
+  - checkout: self
+
+  - script: |
+      set -euo pipefail
+      case "$(targetEnv)" in
+        dev|stg|prod) echo "Deploying to: $(targetEnv)";;
+        *) echo "Refusing to deploy from branch '$(targetEnv)'"; exit 1;;
+      esac
+    displayName: Guard — branch must be dev/stg/prod
+
+  - task: NodeTool@0
+    inputs:
+      versionSpec: "20.x"
+    displayName: Use Node 20
+
+  - script: |
+      set -euo pipefail
+      cd frontend && npm ci && npm run build
+    displayName: Build frontend (-> src/static)
+
+  - script: |
+      set -euo pipefail
+      curl -fsSL https://raw.githubusercontent.com/databricks/setup-cli/main/install.sh | sh
+      databricks version
+    displayName: Install Databricks CLI
+
+  - script: |
+      set -euo pipefail
+      databricks bundle validate -t "$(targetEnv)"
+      databricks bundle deploy   -t "$(targetEnv)"
+      databricks bundle run ado_app -t "$(targetEnv)"
+      databricks apps get ado-companion --output json | python3 -c 'import sys,json;print("App URL:",json.load(sys.stdin).get("url","?"))'
+    displayName: Deploy + run ($(targetEnv))
+    env:
+      DATABRICKS_HOST: $(DATABRICKS_HOST)
+      DATABRICKS_CLIENT_ID: $(DATABRICKS_CLIENT_ID)
+      DATABRICKS_CLIENT_SECRET: $(DATABRICKS_CLIENT_SECRET)
