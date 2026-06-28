@@ -41,7 +41,13 @@ ADO functionality splits into two planes. Keeping them separate is the central d
 | **Non-Databricks fallback** | Not on Databricks | Mirror ADO data → Postgres; NL→SQL with the Claude API; charts in-app |
 
 We build the analytics surface behind an interface so the backing engine can swap
-without touching the UI. **Decision still open — confirm Databricks availability.**
+without touching the UI.
+
+**Confirmed:** Databricks is available, but development uses a personal
+**Free Edition** workspace (see §8). Integration is via the **Genie Conversation
+API through our BFF** — not the iframe (which requires every viewer to hold
+Databricks access and can't be styled). Our backend holds one token, calls Genie,
+and renders results in our own UI.
 
 ## 3. Recommended stack (web-first, single codebase)
 
@@ -64,8 +70,9 @@ The web app is the single source of truth; other surfaces wrap or embed it.
 2. **Microsoft Teams tab / M365 app** — strongest bonus. Same codebase, Entra SSO,
    and DevOps teams already live in Teams. Highest value-to-effort.
 3. **Mac app via Tauri** — cheap wrapper; menu-bar/offline niceties. Low effort.
-4. **Databricks App (React)** — Databricks Apps host Node/React natively; if data is in
-   Databricks this becomes the natural analytics host (Genie + Unity Catalog auth built in).
+4. **Databricks App (React)** — ~~natural analytics host~~ **deprioritized**: Free Edition
+   caps apps at 24h of runtime per deploy (§8), so it can't host anything always-on.
+   Revisit only on a paid workspace.
 
 ## 5. Phased build
 
@@ -77,16 +84,38 @@ The web app is the single source of truth; other surfaces wrap or embed it.
 
 ## 6. Open decisions
 
-1. **Databricks availability** — drives the entire analytics path (Genie vs Postgres/Claude). *Default: design pluggable, lead with Genie.*
+1. ~~Databricks availability~~ **Resolved**: on Databricks (Free Edition for dev). Genie via Conversation API; analytics stays pluggable. See §7.
 2. **Write-back scope for MVP** — read-only / core write-back / full CRUD+automation. *Default: read parity (P1) then core write-back (P2).*
 3. **Bonus surfaces to plan in vs. defer** — *Default: plan Teams/M365 in; note Mac + Databricks App as follow-ons.*
 4. **Stack confirmation** — Next.js/React assumed. Push back if you prefer otherwise.
 
-## 7. References
+## 7. Databricks Free Edition constraints
+
+Development targets a personal **Free Edition** workspace. It's great for prototyping
+the analytics plane, but is **not** a production backend.
+
+| Capability | Free Edition limit | Consequence |
+|---|---|---|
+| Databricks Apps | ≤3, each stops 24h after start/redeploy | Don't host the app here; web stays on Vercel |
+| SQL warehouse (Genie needs one) | One, 2X-Small only | Enough for personal/dev Genie |
+| Genie Conversation API | Best-effort, ~5 questions/min | Fine for dev, not production throughput |
+| Usage quota | Exceed → compute off rest of day/month | Dev-fragile; analytics must degrade gracefully |
+| Commercial use | **Non-commercial only** | Swap to paid workspace before any real product |
+| Other | One workspace/metastore, no SLA, deleted after prolonged inactivity | Treat as disposable dev infra |
+
+**Design rules that follow:**
+- Databricks connection is **swappable config** (host, warehouse ID, Genie Space ID,
+  token) → Free → paid is a config change, not a rewrite.
+- Operational CRUD plane never depends on Databricks, so the app stays fully usable
+  when the warehouse is quota-capped, asleep, or being migrated.
+- Genie via **Conversation API + BFF** (not iframe); works on Free Edition with a PAT.
+
+## 8. References
 
 - Reference app: https://github.com/PurpleSoftSrl/azure_devops_app
 - [Genie Conversation API](https://docs.databricks.com/aws/en/genie/conversation-api)
 - [Embed a Genie Space in an external app](https://docs.databricks.com/aws/en/genie/embed)
 - [Databricks Apps](https://docs.databricks.com/aws/en/dev-tools/databricks-apps/)
+- [Databricks Free Edition limitations](https://docs.databricks.com/aws/en/getting-started/free-edition-limitations)
 - [Azure DevOps REST API](https://learn.microsoft.com/en-us/rest/api/azure/devops/)
 - [Azure DevOps Analytics (OData)](https://learn.microsoft.com/en-us/azure/devops/report/)
