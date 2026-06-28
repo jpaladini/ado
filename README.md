@@ -60,6 +60,9 @@ cd src && pip install -r requirements-dev.txt && pytest
 ## Deploy to Databricks
 
 The full runbook is in **[`SETUP_DATABRICKS.md`](SETUP_DATABRICKS.md)** — automated and manual paths.
+Pointing an **AI coding agent** (e.g. Genie Code) at the repo? It should follow
+**[`AGENTS.md`](AGENTS.md)** — a deterministic, idempotent runbook. The built frontend is
+committed under `src/static/`, so deploying needs **no Node**.
 
 **Fast path** (from the repo root):
 ```bash
