@@ -23,10 +23,30 @@ that environment. Direct pushes are blocked by branch policy; merges go through 
 ## One-time setup (per environment)
 
 ### 1. Service principal per workspace
-In each workspace (dev/stg/prod), create a **service principal** and an **OAuth secret**
-(client ID + client secret). Grant it:
-- permission to deploy/manage the app (`ado-companion`), and
-- `CAN_MANAGE`/deploy rights for the bundle resources.
+The pipeline authenticates as a **service principal** (non-human identity) using OAuth
+machine-to-machine. You need its **client ID** (= Application ID) and a **client secret**.
+
+**Create it + find the client ID (Databricks UI):**
+1. **Settings → Identity and access → Service principals → Add service principal**
+   (e.g. name it `ado-deployer`). Do this in each workspace (dev/stg/prod), or create one
+   account-level SP and grant it to each workspace.
+2. Open the service principal — the **Application ID** shown is your `DATABRICKS_CLIENT_ID`
+   (a UUID like `12345678-90ab-cdef-1234-567890abcdef`).
+3. On the same page → **OAuth secrets → Generate secret**. Copy the **Secret**
+   (`DATABRICKS_CLIENT_SECRET`) — it is shown **once**. (Set an expiry and rotate before it lapses.)
+4. Grant the SP rights to deploy: **CAN_MANAGE** on the app `ado-companion` (and on the
+   target catalog/schema/secret scope it touches). Also add it to the workspace if it's
+   an account-level SP.
+
+**Find the client ID later (CLI):**
+```bash
+databricks service-principals list   # the applicationId column is the client ID
+```
+
+> **Note:** OAuth M2M service principals are a **paid-workspace** capability. On personal
+> **Free Edition** you may not be able to generate SP secrets — that's fine, because dev is
+> bootstrapped with your own `databricks auth login` (no client ID). Client IDs are for the
+> corporate stg/prod CI.
 
 The app's runtime secrets (`ado/ado_org_url`, `ado/ado_pat`) are created **once per
 workspace** by a human (via `scripts/setup.sh` or `databricks secrets put-secret`) — the
