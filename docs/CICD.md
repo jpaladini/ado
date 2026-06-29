@@ -53,16 +53,18 @@ workspace** by a human (via `scripts/setup.sh` or `databricks secrets put-secret
 pipeline does **not** manage them, so the PAT never touches CI.
 
 ### 2. Variable groups in Azure DevOps
-Create three variable groups (Pipelines → Library): `databricks-dev`, `databricks-stg`,
-`databricks-prod`. Each contains:
+Create one variable group per environment you use (Pipelines → Library): `databricks-dev`,
+`databricks-stg`, `databricks-prod`. Each contains (PAT auth — the default, required for
+Free Edition):
 
 | Variable | Notes |
 |---|---|
 | `DATABRICKS_HOST` | Workspace URL, e.g. `https://<ws>.cloud.databricks.com` |
-| `DATABRICKS_CLIENT_ID` | Service principal application ID |
-| `DATABRICKS_CLIENT_SECRET` | OAuth secret — mark as **secret** |
+| `DATABRICKS_TOKEN` | Databricks PAT (Settings → Developer → Access tokens) — mark as **secret** |
 
-The deploy pipeline auto-selects the group matching the branch.
+The deploy pipeline auto-selects the group matching the branch. *(Prod hardening, optional:
+swap to an OAuth service principal — put `DATABRICKS_CLIENT_ID` + `DATABRICKS_CLIENT_SECRET`
+in the group instead of `DATABRICKS_TOKEN`, and update the pipeline's `env:` block to match.)*
 
 ### 2b. (Free Edition / no service principal) — PAT auth alternative
 If a workspace can't issue an SP OAuth secret (e.g. Free Edition), authenticate the

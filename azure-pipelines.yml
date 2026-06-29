@@ -72,6 +72,7 @@ steps:
       databricks apps get ado-companion --output json | python3 -c 'import sys,json;print("App URL:",json.load(sys.stdin).get("url","?"))'
     displayName: Deploy + run ($(targetEnv))
     env:
+      # PAT auth (works on Free Edition + corporate). For prod you can switch to
+      # an OAuth service principal — set DATABRICKS_CLIENT_ID/SECRET instead.
       DATABRICKS_HOST: $(DATABRICKS_HOST)
-      DATABRICKS_CLIENT_ID: $(DATABRICKS_CLIENT_ID)
-      DATABRICKS_CLIENT_SECRET: $(DATABRICKS_CLIENT_SECRET)
+      DATABRICKS_TOKEN: $(DATABRICKS_TOKEN)
