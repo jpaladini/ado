@@ -40,17 +40,20 @@ jobs:
           GIT_TERMINAL_PROMPT: "0" # fail fast instead of prompting for a username
         run: |
           set -euo pipefail
-          if [ -z "${ADO_PAT:-}" ] || [ -z "${ADO_REPO_URL:-}" ]; then
+          # Strip any stray whitespace/newlines a secret may have been pasted with.
+          pat="$(printf '%s' "${ADO_PAT:-}" | tr -d '[:space:]')"
+          url="$(printf '%s' "${ADO_REPO_URL:-}" | tr -d '[:space:]')"
+          if [ -z "$pat" ] || [ -z "$url" ]; then
             echo "ADO_PAT / ADO_REPO_URL secrets not set — skipping mirror."
             exit 0
           fi
-          case "$ADO_REPO_URL" in
-            https://*) rest="${ADO_REPO_URL#https://}" ;;
+          case "$url" in
+            https://*) rest="${url#https://}" ;;
             *) echo "ADO_REPO_URL must be an https:// URL (e.g. https://dev.azure.com/<org>/<project>/_git/<repo>)"; exit 1 ;;
           esac
           rest="${rest#*@}"          # drop any credentials already in the URL
           rest="${rest%/}"          # drop a trailing slash
-          echo "::add-mask::$ADO_PAT"
+          echo "::add-mask::$pat"
           # Azure DevOps accepts the PAT as the password (any non-empty username).
-          git push --force "https://pat:${ADO_PAT}@${rest}" "HEAD:refs/heads/${BRANCH}"
+          git push --force "https://pat:${pat}@${rest}" "HEAD:refs/heads/${BRANCH}"
           echo "Mirrored '${BRANCH}' → Azure DevOps (${rest})."
