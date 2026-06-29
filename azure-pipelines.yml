@@ -28,14 +28,17 @@ pool:
 
 variables:
   - name: targetEnv
-    value: $(Build.SourceBranchName)   # resolves to dev | stg | prod
-  # Pull the correct credentials for this branch's environment.
-  - ${{ if eq(variables['Build.SourceBranchName'], 'dev') }}:
-      - group: databricks-dev
-  - ${{ if eq(variables['Build.SourceBranchName'], 'stg') }}:
-      - group: databricks-stg
-  - ${{ if eq(variables['Build.SourceBranchName'], 'prod') }}:
-      - group: databricks-prod
+    value: $(Build.SourceBranchName)   # resolves to dev | stg | prod -> bundle target
+
+# Databricks auth (DATABRICKS_HOST, DATABRICKS_CLIENT_ID, DATABRICKS_CLIENT_SECRET)
+# comes from *pipeline variables* — set them under: Pipelines → your pipeline → Edit →
+# Variables (mark DATABRICKS_CLIENT_SECRET as secret). They are mapped into the deploy
+# step's env: block below.
+#
+# Multi-workspace alternative: instead of pipeline variables, link per-branch variable
+# groups (Library) by adding here — each group must be authorized for this pipeline:
+#   - ${{ if eq(variables['Build.SourceBranchName'], 'dev') }}:
+#       - group: databricks-dev
 
 steps:
   - checkout: self

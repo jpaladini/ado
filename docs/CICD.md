@@ -52,9 +52,18 @@ The app's runtime secrets (`ado/ado_org_url`, `ado/ado_pat`) are created **once 
 workspace** by a human (via `scripts/setup.sh` or `databricks secrets put-secret`) — the
 pipeline does **not** manage them, so the PAT never touches CI.
 
-### 2. Variable groups in Azure DevOps
-Create one variable group per environment you use (Pipelines → Library): `databricks-dev`,
-`databricks-stg`, `databricks-prod`. Each contains (OAuth service-principal auth — the default):
+### 2. Provide the Databricks credentials
+The deploy pipeline reads `DATABRICKS_HOST`, `DATABRICKS_CLIENT_ID`, `DATABRICKS_CLIENT_SECRET`.
+Two ways to supply them:
+
+- **Simplest (single workspace): pipeline variables.** Pipelines → your pipeline → Edit →
+  **Variables** → add the three (mark `DATABRICKS_CLIENT_SECRET` as **secret**). No variable
+  group needed. This is what the YAML assumes out of the box.
+- **Multi-workspace: variable groups.** Create one group per environment (Library):
+  `databricks-dev`, `databricks-stg`, `databricks-prod`, then uncomment the `- group:`
+  lines in `azure-pipelines.yml` and **authorize** each group for the pipeline.
+
+Each set contains (OAuth service-principal auth — the default):
 
 | Variable | Notes |
 |---|---|

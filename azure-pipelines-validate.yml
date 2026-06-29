@@ -8,8 +8,8 @@ pr: none
 pool:
   vmImage: ubuntu-latest
 
-variables:
-  - group: databricks-dev   # only used to give `bundle validate` a host
+# DATABRICKS_HOST / DATABRICKS_CLIENT_ID / DATABRICKS_CLIENT_SECRET come from
+# pipeline variables (or link a variable group here with `- group: <name>`).
 
 steps:
   - checkout: self
