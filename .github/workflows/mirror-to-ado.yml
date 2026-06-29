@@ -37,15 +37,20 @@ jobs:
           ADO_PAT: ${{ secrets.ADO_PAT }}
           ADO_REPO_URL: ${{ secrets.ADO_REPO_URL }}
           BRANCH: ${{ github.ref_name }}
+          GIT_TERMINAL_PROMPT: "0" # fail fast instead of prompting for a username
         run: |
           set -euo pipefail
           if [ -z "${ADO_PAT:-}" ] || [ -z "${ADO_REPO_URL:-}" ]; then
             echo "ADO_PAT / ADO_REPO_URL secrets not set — skipping mirror."
             exit 0
           fi
-          # Azure DevOps Basic auth = base64 of ":<PAT>" (empty username).
-          AUTH=$(printf ":%s" "$ADO_PAT" | base64 -w0)
-          echo "::add-mask::$AUTH"
-          git -c http.extraheader="Authorization: Basic $AUTH" \
-            push --force "$ADO_REPO_URL" "HEAD:refs/heads/${BRANCH}"
-          echo "Mirrored '${BRANCH}' → Azure DevOps."
+          case "$ADO_REPO_URL" in
+            https://*) rest="${ADO_REPO_URL#https://}" ;;
+            *) echo "ADO_REPO_URL must be an https:// URL (e.g. https://dev.azure.com/<org>/<project>/_git/<repo>)"; exit 1 ;;
+          esac
+          rest="${rest#*@}"          # drop any credentials already in the URL
+          rest="${rest%/}"          # drop a trailing slash
+          echo "::add-mask::$ADO_PAT"
+          # Azure DevOps accepts the PAT as the password (any non-empty username).
+          git push --force "https://pat:${ADO_PAT}@${rest}" "HEAD:refs/heads/${BRANCH}"
+          echo "Mirrored '${BRANCH}' → Azure DevOps (${rest})."
