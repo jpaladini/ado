@@ -87,6 +87,32 @@ This is fine for personal/dev CI; prefer the service principal for corporate stg
   Validation** policy on the `dev`, `stg`, and `prod` branches (Repos → Branches →
   Branch policies). This enforces tests + build + validate before merge.
 
+## Mirror GitHub → Azure DevOps (no manual sync)
+
+If development happens on GitHub but the canonical repo + pipelines live in Azure DevOps,
+`.github/workflows/mirror-to-ado.yml` keeps them in sync automatically: every push to a
+non-protected branch is force-pushed to the same-named branch in ADO. You then PR that
+branch into `dev`/`stg`/`prod` **inside ADO**, so the protected-branch gates and the deploy
+pipeline stay in control — the mirror never touches `dev`/`stg`/`prod` directly.
+
+```
+push to GitHub (feature branch)
+        │  GitHub Action (mirror-to-ado.yml)
+        ▼
+Azure DevOps repo (same branch)  ──PR──▶  dev/stg/prod  ──▶  azure-pipelines.yml  ──▶  Databricks
+```
+
+One-time setup — add two **GitHub** repository secrets (Settings → Secrets and variables →
+Actions):
+
+| Secret | Value |
+|---|---|
+| `ADO_REPO_URL` | e.g. `https://dev.azure.com/jpaladini85/home/_git/ado` |
+| `ADO_PAT` | Azure DevOps PAT with scope **Code (Read & Write)** |
+
+The PAT lives only in GitHub Secrets — it never enters a coding session or the repo. To mirror
+additional protected branches, edit the `branches-ignore` list in the workflow.
+
 ## Notes
 - The committed `src/static/` is a convenience for manual/agent deploys; CI rebuilds it
   fresh each run, so prod always ships a clean build.

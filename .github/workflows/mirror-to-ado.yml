@@ -1,0 +1,51 @@
+# Mirror pushes from GitHub → Azure DevOps Repos.
+#
+# On every push (except to the protected dev/stg/prod branches), force-push the
+# branch to the same-named branch in Azure DevOps. You then open PRs from that
+# branch into dev/stg/prod *inside* ADO — so the protected-branch gates and the
+# branch-based deploy pipeline (azure-pipelines.yml) stay in control.
+#
+# One-time setup — add two repository secrets (Settings → Secrets and variables
+# → Actions) on the GitHub repo:
+#   ADO_REPO_URL  e.g. https://dev.azure.com/jpaladini85/home/_git/ado
+#   ADO_PAT       an Azure DevOps PAT with scope: Code (Read & Write)
+# The PAT lives only in GitHub Secrets — never in this session or the repo.
+name: Mirror to Azure DevOps
+
+on:
+  push:
+    branches-ignore:
+      - dev
+      - stg
+      - prod
+
+concurrency:
+  group: mirror-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Push branch to Azure DevOps
+        env:
+          ADO_PAT: ${{ secrets.ADO_PAT }}
+          ADO_REPO_URL: ${{ secrets.ADO_REPO_URL }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [ -z "${ADO_PAT:-}" ] || [ -z "${ADO_REPO_URL:-}" ]; then
+            echo "ADO_PAT / ADO_REPO_URL secrets not set — skipping mirror."
+            exit 0
+          fi
+          # Azure DevOps Basic auth = base64 of ":<PAT>" (empty username).
+          AUTH=$(printf ":%s" "$ADO_PAT" | base64 -w0)
+          echo "::add-mask::$AUTH"
+          git -c http.extraheader="Authorization: Basic $AUTH" \
+            push --force "$ADO_REPO_URL" "HEAD:refs/heads/${BRANCH}"
+          echo "Mirrored '${BRANCH}' → Azure DevOps."
