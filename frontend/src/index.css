@@ -2,10 +2,116 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ---- Design tokens (light / dark) ---------------------------------------- */
 :root {
-  color-scheme: light dark;
+  --bg: #f4f5f7;
+  --surface: #ffffff;
+  --surface-2: #fafbfc;
+  --border: #e3e6ea;
+  --border-2: #edeff2;
+  --line: #f0f1f4;
+  --hover: #fafafb;
+  --text: #15191e;
+  --text-2: #3d444b;
+  --text-3: #5b6770;
+  --muted: #7a828b;
+  --faint: #9aa3ad;
+  --dvf: #c8cdd3;
+  --accent: #ff3621;
+  --accent-hover: #e22d1b;
+  --accent-text: #ff3621;
+  --accent-tint: #fff1ef;
+  --accent-border: #fbd5ce;
+  --ink-bg: #1b3139;
+  --ink-fg: #ffffff;
+  --toast-bg: #1b3139;
+  --ok: #138a4e;
+  --ok-bg: #e4f3ea;
+  --btn-ok: #138a4e;
+  --info: #2d6cdf;
+  --info-bg: #e7eefc;
+  --purple: #7a5af8;
+  --purple-bg: #efeafe;
+  --warn: #b26a00;
+  --warn-bg: #fff1e0;
+  --danger: #d23b23;
+  --danger-bg: #fbe7e3;
+  --nbg: #eef1f4;
+  --nfg: #5b6770;
+  --abandon-border: #f2c9c1;
+  --c-green: #19a85c;
+  --c-amber: #e5a000;
+  --c-red: #d23b23;
+  --donut-track: #edeff2;
+}
+
+.dark {
+  --bg: #0e1417;
+  --surface: #161d22;
+  --surface-2: #1b232a;
+  --border: #2a343b;
+  --border-2: #232c32;
+  --line: #232c32;
+  --hover: #1e272d;
+  --text: #eef1f3;
+  --text-2: #c5cdd2;
+  --text-3: #9aa5ac;
+  --muted: #7c878f;
+  --faint: #606b73;
+  --dvf: #3a444b;
+  --accent: #ff5740;
+  --accent-hover: #ff6b57;
+  --accent-text: #ff8472;
+  --accent-tint: rgba(255, 87, 64, 0.15);
+  --accent-border: rgba(255, 87, 64, 0.4);
+  --ink-bg: #2c373e;
+  --ink-fg: #eef1f3;
+  --toast-bg: #2c373e;
+  --ok: #54d08c;
+  --ok-bg: rgba(31, 158, 92, 0.18);
+  --btn-ok: #1f9e5c;
+  --info: #84b2ff;
+  --info-bg: rgba(45, 108, 223, 0.2);
+  --purple: #b9a6ff;
+  --purple-bg: rgba(122, 90, 248, 0.24);
+  --warn: #e8b24a;
+  --warn-bg: rgba(229, 160, 0, 0.18);
+  --danger: #ff8472;
+  --danger-bg: rgba(210, 59, 35, 0.22);
+  --nbg: rgba(255, 255, 255, 0.08);
+  --nfg: #aeb8bf;
+  --abandon-border: rgba(255, 132, 114, 0.4);
+  --c-green: #2bc271;
+  --c-amber: #f0b838;
+  --c-red: #ff6b52;
+  --donut-track: #2a343b;
+}
+
+html,
+body,
+#root {
+  height: 100%;
 }
 
 body {
-  @apply bg-slate-50 text-slate-900 antialiased;
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ---- Toast animation ------------------------------------------------------ */
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 10px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+.animate-toast-in {
+  animation: toast-in 0.18s ease-out;
 }

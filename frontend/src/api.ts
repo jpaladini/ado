@@ -11,6 +11,11 @@ export interface Health {
   ado_configured: boolean;
 }
 
+export interface Me {
+  id: string | null;
+  displayName: string | null;
+}
+
 export interface WorkItem {
   id: number;
   title: string;
@@ -85,6 +90,7 @@ async function send<T>(path: string, method: string, body?: unknown): Promise<T>
 const enc = encodeURIComponent;
 
 export const fetchHealth = () => get<Health>("/api/health");
+export const fetchMe = () => get<Me>("/api/me");
 export const fetchProjects = () => get<{ value: Project[] }>("/api/projects");
 
 export const fetchWorkItems = (p: string) =>
