@@ -93,6 +93,18 @@ export const fetchHealth = () => get<Health>("/api/health");
 export const fetchMe = () => get<Me>("/api/me");
 export const fetchProjects = () => get<{ value: Project[] }>("/api/projects");
 
+export interface Analytics {
+  byCategory: Record<string, number>;
+  open: number;
+  total: number;
+  trend: { date: string; count: number }[];
+  range: string;
+  available: boolean;
+}
+
+export const fetchAnalytics = (p: string, range: string) =>
+  get<Analytics>(`/api/projects/${enc(p)}/analytics?range=${range}`);
+
 export const fetchWorkItems = (p: string) =>
   get<{ value: WorkItem[] }>(`/api/projects/${enc(p)}/workitems`);
 export const fetchPullRequests = (p: string, status = "active") =>

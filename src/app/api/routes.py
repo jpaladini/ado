@@ -5,6 +5,7 @@ import httpx
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
+from app.ado.analytics import AnalyticsClient, OPEN_CATEGORIES
 from app.ado.client import ADOClient, ADOConfigError
 from app.config import settings
 
@@ -62,6 +63,42 @@ async def builds(project: str, top: int = Query(25, le=100)) -> dict[str, object
 @router.get("/projects/{project}/repos")
 async def repos(project: str) -> dict[str, object]:
     return {"value": await _call(lambda c: c.list_repos(project))}
+
+
+_RANGE_DAYS = {"24h": 1, "7d": 7, "30d": 30}
+
+
+@router.get("/projects/{project}/analytics")
+async def analytics(project: str, range: str = Query("7d")) -> dict[str, object]:
+    """Server-side aggregates (donut + open KPI) and a daily trend, via ADO Analytics
+    OData. Degrades gracefully: if Analytics is unavailable, returns available=false so
+    the dashboard can fall back to its client-side rollup."""
+    days = _RANGE_DAYS.get(range, 7)
+    by_category: dict[str, int] = {}
+    trend: list[dict[str, object]] = []
+    available = True
+    try:
+        client = AnalyticsClient()
+        by_category = await client.count_by_state_category(project)
+        try:
+            trend = await client.open_trend(project, days)  # snapshots may be disabled
+        except httpx.HTTPError:
+            trend = []
+    except ADOConfigError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except httpx.HTTPError:
+        available = False
+
+    total = sum(by_category.values())
+    open_count = sum(v for k, v in by_category.items() if k in OPEN_CATEGORIES)
+    return {
+        "byCategory": by_category,
+        "open": open_count,
+        "total": total,
+        "trend": trend,
+        "range": range,
+        "available": available,
+    }
 
 
 @router.get("/projects/{project}/repos/{repo_id}/commits")
