@@ -102,9 +102,18 @@ async function send<T>(path: string, method: string, body?: unknown): Promise<T>
 
 const enc = encodeURIComponent;
 
+export interface Freshness {
+  available: boolean;
+  asOf?: string;
+  reason?: string;
+}
+
 export const fetchHealth = () => get<Health>("/api/health");
 export const askGenie = (question: string, conversationId?: string) =>
   send<GenieAnswer>("/api/genie/ask", "POST", { question, conversationId });
+export const fetchFreshness = () => get<Freshness>("/api/analytics/freshness");
+export const refreshAnalyticsData = () =>
+  send<{ started: boolean; runId?: number; reason?: string }>("/api/analytics/refresh", "POST");
 export const fetchMe = () => get<Me>("/api/me");
 export const fetchProjects = () => get<{ value: Project[] }>("/api/projects");
 

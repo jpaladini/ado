@@ -5,7 +5,7 @@ import httpx
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
-from app import genie
+from app import genie, insights
 from app.ado.analytics import AnalyticsClient, OPEN_CATEGORIES
 from app.ado.client import ADOClient, ADOConfigError
 from app.config import settings
@@ -109,6 +109,19 @@ async def analytics(project: str, range: str = Query("7d")) -> dict[str, object]
 @router.get("/projects/{project}/repos/{repo_id}/commits")
 async def commits(project: str, repo_id: str, top: int = Query(25, le=100)) -> dict[str, object]:
     return {"value": await _call(lambda c: c.list_commits(project, repo_id, top=top))}
+
+
+# -- analytics data freshness ---------------------------------------------------
+
+
+@router.get("/analytics/freshness")
+async def analytics_freshness() -> dict[str, object]:
+    return await insights.freshness()
+
+
+@router.post("/analytics/refresh")
+async def analytics_refresh() -> dict[str, object]:
+    return await insights.refresh()
 
 
 # -- genie (NL analytics) -------------------------------------------------------

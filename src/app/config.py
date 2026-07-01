@@ -12,6 +12,9 @@ class Settings(BaseSettings):
     # Genie Space ID for NL analytics. Optional env override; when unset, the app
     # tries the ado/genie_space_id secret at runtime (see app/genie.py).
     genie_space_id: str = ""
+    # Where the ingest job lands the analytics Delta tables.
+    analytics_catalog: str = "workspace"
+    analytics_schema: str = "ado_analytics"
 
     @property
     def ado_configured(self) -> bool:
