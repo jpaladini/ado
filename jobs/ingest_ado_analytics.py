@@ -16,6 +16,7 @@ from datetime import date, timedelta
 
 import requests
 from pyspark.sql import SparkSession
+from pyspark.sql.types import LongType, StringType, StructField, StructType
 
 ODATA_VERSION = "v4.0-preview"
 SNAPSHOT_DAYS = 90
@@ -93,8 +94,37 @@ def main() -> None:
         }
         for r in items
     ]
+    # Explicit schema: inference fails when a column (e.g. completed_date) is all-NULL.
+    items_schema = StructType(
+        [
+            StructField("work_item_id", LongType()),
+            StructField("title", StringType()),
+            StructField("type", StringType()),
+            StructField("state", StringType()),
+            StructField("state_category", StringType()),
+            StructField("assigned_to", StringType()),
+            StructField("created_date", StringType()),
+            StructField("changed_date", StringType()),
+            StructField("completed_date", StringType()),
+        ]
+    )
     if flat:
-        spark.createDataFrame(flat).write.mode("overwrite").saveAsTable(f"{fq}.work_items")
+        (
+            spark.createDataFrame(flat, schema=items_schema)
+            .selectExpr(
+                "work_item_id",
+                "title",
+                "type",
+                "state",
+                "state_category",
+                "assigned_to",
+                "to_timestamp(created_date) AS created_date",
+                "to_timestamp(changed_date) AS changed_date",
+                "to_timestamp(completed_date) AS completed_date",
+            )
+            .write.mode("overwrite")
+            .saveAsTable(f"{fq}.work_items")
+        )
     print(f"work_items: {len(flat)} rows -> {fq}.work_items")
 
     # -- daily state counts (trend history) -------------------------------------
@@ -119,8 +149,21 @@ def main() -> None:
         }
         for r in daily
     ]
+    daily_schema = StructType(
+        [
+            StructField("date", StringType()),
+            StructField("state", StringType()),
+            StructField("state_category", StringType()),
+            StructField("count", LongType()),
+        ]
+    )
     if flat_daily:
-        spark.createDataFrame(flat_daily).write.mode("overwrite").saveAsTable(f"{fq}.work_item_daily")
+        (
+            spark.createDataFrame(flat_daily, schema=daily_schema)
+            .selectExpr("to_date(date) AS date", "state", "state_category", "count")
+            .write.mode("overwrite")
+            .saveAsTable(f"{fq}.work_item_daily")
+        )
     print(f"work_item_daily: {len(flat_daily)} rows -> {fq}.work_item_daily")
 
 
