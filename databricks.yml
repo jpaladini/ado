@@ -39,7 +39,10 @@ resources:
           environment_key: default
           spark_python_task:
             python_file: ./jobs/ingest_ado_analytics.py
-            parameters: ["--catalog", "main", "--schema", "ado_analytics", "--project", ""]
+            # catalog: Free Edition's default is `workspace`; corporate workspaces
+            # typically use `main` or a domain catalog — adjust per target if needed.
+            # project comes from the ado/ado_project secret when the flag is empty.
+            parameters: ["--catalog", "workspace", "--schema", "ado_analytics", "--project", ""]
       environments:
         - environment_key: default
           spec:
