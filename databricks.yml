@@ -25,6 +25,26 @@ targets:
     mode: production
 
 resources:
+  jobs:
+    ado_analytics_ingest:
+      name: ado-analytics-ingest
+      description: "Ingest ADO Analytics OData into Delta (work_items, work_item_daily) for Genie"
+      # Paused by default — unpause after creating the Genie Space (docs/GENIE.md).
+      schedule:
+        quartz_cron_expression: "0 0 5 * * ?"   # daily 05:00 UTC
+        timezone_id: UTC
+        pause_status: PAUSED
+      tasks:
+        - task_key: ingest
+          environment_key: default
+          spark_python_task:
+            python_file: ./jobs/ingest_ado_analytics.py
+            parameters: ["--catalog", "main", "--schema", "ado_analytics", "--project", ""]
+      environments:
+        - environment_key: default
+          spec:
+            client: "2"
+
   apps:
     ado_app:
       name: ado-companion

@@ -88,8 +88,10 @@ The MVP = Phases 0–2.
 - **Phase 2 — Write / CRUD (in MVP)** 🔨: work item state change + comments, PR
   approve/abandon/reactivate — done, via the FastAPI BFF with query invalidation and
   per-row error surfacing. Remaining: create work items, queue/cancel pipeline runs.
-- **Phase 3 — Analytics**: OData→Delta ingest job; Genie Space; DORA dashboards
-  (lead time, deploy frequency, change-fail rate, MTTR) + NL-Q&A panel via Conversation API.
+- **Phase 3 — Analytics** 🔨: live OData aggregates power the Overview (done);
+  OData→Delta ingest job + Genie NL-Q&A tab via the Conversation API (built — needs the
+  human Genie-Space setup, see docs/GENIE.md). Remaining: DORA metrics (lead time,
+  deploy frequency, change-fail rate, MTTR).
 - **Phase 4 — Surfaces (optional)**: Teams tab embedding the app; Tauri Mac wrapper.
 
 ## 6. Open decisions

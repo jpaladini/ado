@@ -9,6 +9,9 @@ class Settings(BaseSettings):
     ado_org_url: str = ""
     # Personal Access Token (injected from a Databricks secret in prod)
     ado_pat: str = ""
+    # Genie Space ID for NL analytics. Optional env override; when unset, the app
+    # tries the ado/genie_space_id secret at runtime (see app/genie.py).
+    genie_space_id: str = ""
 
     @property
     def ado_configured(self) -> bool:

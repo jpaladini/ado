@@ -5,6 +5,7 @@ import httpx
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
+from app import genie
 from app.ado.analytics import AnalyticsClient, OPEN_CATEGORIES
 from app.ado.client import ADOClient, ADOConfigError
 from app.config import settings
@@ -30,7 +31,11 @@ async def _call(fn: Callable[[ADOClient], Awaitable[T]]) -> T:
 
 @router.get("/health")
 async def health() -> dict[str, object]:
-    return {"status": "ok", "ado_configured": settings.ado_configured}
+    return {
+        "status": "ok",
+        "ado_configured": settings.ado_configured,
+        "genie_configured": genie.genie_available(),
+    }
 
 
 @router.get("/me")
@@ -104,6 +109,27 @@ async def analytics(project: str, range: str = Query("7d")) -> dict[str, object]
 @router.get("/projects/{project}/repos/{repo_id}/commits")
 async def commits(project: str, repo_id: str, top: int = Query(25, le=100)) -> dict[str, object]:
     return {"value": await _call(lambda c: c.list_commits(project, repo_id, top=top))}
+
+
+# -- genie (NL analytics) -------------------------------------------------------
+
+
+class GenieAsk(BaseModel):
+    question: str
+    conversationId: str | None = None
+
+
+@router.post("/genie/ask")
+async def genie_ask(body: GenieAsk) -> dict[str, object]:
+    q = body.question.strip()
+    if not q:
+        raise HTTPException(status_code=422, detail="Question is empty")
+    try:
+        return await genie.ask(q, body.conversationId)
+    except genie.GenieNotConfigured as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Genie request failed: {e}")
 
 
 # -- writes -------------------------------------------------------------------

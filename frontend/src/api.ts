@@ -9,6 +9,19 @@ export interface Project {
 export interface Health {
   status: string;
   ado_configured: boolean;
+  genie_configured?: boolean;
+}
+
+export interface GenieAnswer {
+  conversationId: string;
+  messageId: string;
+  status: string | null;
+  text: string[];
+  sql: string | null;
+  queryDescription: string | null;
+  columns: string[];
+  rows: (string | null)[][];
+  error?: string;
 }
 
 export interface Me {
@@ -90,6 +103,8 @@ async function send<T>(path: string, method: string, body?: unknown): Promise<T>
 const enc = encodeURIComponent;
 
 export const fetchHealth = () => get<Health>("/api/health");
+export const askGenie = (question: string, conversationId?: string) =>
+  send<GenieAnswer>("/api/genie/ask", "POST", { question, conversationId });
 export const fetchMe = () => get<Me>("/api/me");
 export const fetchProjects = () => get<{ value: Project[] }>("/api/projects");
 

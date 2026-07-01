@@ -22,11 +22,12 @@ import WorkItems from "../screens/WorkItems";
 import PullRequests from "../screens/PullRequests";
 import Pipelines from "../screens/Pipelines";
 import Code from "../screens/Code";
+import Analytics from "../screens/Analytics";
 
 const TABS = ["Overview", "Work Items", "Pull Requests", "Pipelines", "Code"] as const;
-type Tab = (typeof TABS)[number];
+type Tab = (typeof TABS)[number] | "Analytics";
 
-const ICONS: Record<Tab, (p: { size?: number }) => JSX.Element> = {
+const ICONS: Record<(typeof TABS)[number], (p: { size?: number }) => JSX.Element> = {
   Overview: IconOverview,
   "Work Items": IconWork,
   "Pull Requests": IconPrs,
@@ -101,10 +102,20 @@ export default function Shell({
           <div className="px-[11px] pb-[4px] pt-[14px] text-[10px] font-semibold uppercase tracking-[0.8px] text-faint">
             Insights
           </div>
-          <span className="flex cursor-default items-center gap-[10px] rounded-[8px] px-[11px] py-[8px] text-[13px] font-medium text-text-2">
+          <button
+            onClick={() => setTab("Analytics")}
+            className={`relative flex items-center gap-[10px] rounded-[8px] px-[11px] py-[8px] text-[13px] ${
+              tab === "Analytics"
+                ? "bg-accent-tint font-semibold text-accent-text"
+                : "font-medium text-text-2 hover:bg-hover"
+            }`}
+          >
+            {tab === "Analytics" && (
+              <span className="absolute bottom-[8px] left-0 top-[8px] w-[3px] rounded-[2px] bg-accent" />
+            )}
             <IconAnalytics size={16} />
             Analytics
-          </span>
+          </button>
           <span className="flex cursor-default items-center gap-[10px] rounded-[8px] px-[11px] py-[8px] text-[13px] font-medium text-text-2">
             <IconActivity size={16} />
             Activity
@@ -158,6 +169,7 @@ export default function Shell({
           {tab === "Pull Requests" && <PullRequests project={project.name} />}
           {tab === "Pipelines" && <Pipelines project={project.name} />}
           {tab === "Code" && <Code project={project.name} />}
+          {tab === "Analytics" && <Analytics />}
         </div>
       </div>
     </div>
