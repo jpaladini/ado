@@ -87,7 +87,68 @@ curl -s "<app-url>/api/health"
 
 ## Human-only steps (do NOT attempt; report these back)
 1. **Provide the org URL + PAT** (asked in Step 0, stored as secrets in Step 2).
-2. **Phase 3 / Genie** (analytics): a human creates a **Genie Space** in the Databricks UI
-   over the ingested ADO tables. The app's NL-Q&A panel (when built) will call that Space's
-   ID via the Genie Conversation API. Until that exists, the analytics tab is inert — the
-   operational app above works regardless.
+2. **Unity Catalog GRANTs and Genie Space sharing** (see Genie activation below) — RBAC
+   changes are always the human's call.
+
+---
+
+## Genie activation (Phase 3 — NL analytics)
+
+Do this **after** the app deploys. Each step is idempotent. Steps marked **HUMAN** must be
+reported back, not attempted.
+
+### G1. Run the ingest job
+The bundle deploys a job `ado-analytics-ingest` (dev mode prefixes the name). Trigger it with
+explicit params — `workspace` is the Free Edition catalog; corporate workspaces may use another:
+```bash
+databricks jobs list -p "$ENV" | grep ado-analytics-ingest   # note the job id
+databricks jobs run-now <job-id> -p "$ENV" \
+  --python-params '["--catalog","workspace","--schema","ado_analytics","--project","<ADO project name>"]'
+```
+Wait for `TERMINATED SUCCESS`. Creates `workspace.ado_analytics.work_items` and
+`…work_item_daily`. Then **unpause** the job's daily schedule.
+
+### G2. HUMAN — grants
+The schema is owned by the deploy principal; both the asking users and the **app's service
+principal** need read access (Genie executes SQL as the caller). The app SP's client id is in
+`databricks apps get ado-companion` (`service_principal_client_id`). Human runs in the SQL editor:
+```sql
+GRANT USE SCHEMA ON SCHEMA workspace.ado_analytics TO `<user or app-SP-client-id>`;
+GRANT SELECT     ON SCHEMA workspace.ado_analytics TO `<user or app-SP-client-id>`;
+```
+
+### G3. Create the Genie Space (API — works, with three quirks)
+`POST /api/2.0/genie/spaces` with `title`, `description`, `warehouse_id`, and a
+`serialized_space` JSON **string**:
+```json
+{"version": 2,
+ "config": {"sample_questions": [{"id": "<32-hex uuid, no hyphens>", "question": ["..."]}]},
+ "data_sources": {"tables": [{"identifier": "workspace.ado_analytics.work_item_daily"},
+                              {"identifier": "workspace.ado_analytics.work_items"}]},
+ "instructions": {"text_instructions": [{"id": "<32-hex uuid>", "content": ["line 1\n", "line 2\n"]}]}}
+```
+Quirks (each is a 400 otherwise): **tables must be sorted by identifier**; every
+sample-question/instruction **id must be a lowercase 32-hex UUID without hyphens**
+(`uuid4().hex`); `serialized_space` is a JSON-encoded *string*, not an object.
+Include instructions defining "open" = `state_category NOT IN ('Completed','Removed')`.
+The response's `space_id` is what the app needs.
+
+### G4. Store the Space ID (secret; agent may be blocked — then HUMAN)
+```bash
+databricks secrets put-secret ado genie_space_id --string-value "<space_id>" -p "$ENV"
+```
+The app reads it at runtime — **no redeploy**.
+
+### G5. HUMAN — share the Space with the app
+Genie UI → the space → **Share** → add the app's service principal (`app-… ado-companion`) →
+**Can Run** (it also needs access to the space's SQL warehouse).
+
+### G6. Verify
+- `GET <app-url>/api/health` → `"genie_configured": true`
+- Analytics tab → ask "How many open work items are there by state?" → answer + table.
+- Direct API check: `w.genie.start_conversation_and_wait(space_id, question)` should return
+  `COMPLETED` with a text/query attachment.
+
+Failure modes: `INSUFFICIENT_PERMISSIONS … USE SCHEMA` → G2 missing for whoever asked;
+`genie_configured: false` → G4 missing; app's /api/genie/ask fails but direct API works → G5
+missing.
