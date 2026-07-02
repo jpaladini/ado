@@ -24,3 +24,8 @@ frontend/dist/
 .DS_Store
 .idea/
 .vscode/
+
+# coverage artifacts
+.coverage
+coverage.xml
+htmlcov/
