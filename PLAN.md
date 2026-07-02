@@ -88,11 +88,72 @@ The MVP = Phases 0–2.
 - **Phase 2 — Write / CRUD (in MVP)** 🔨: work item state change + comments, PR
   approve/abandon/reactivate — done, via the FastAPI BFF with query invalidation and
   per-row error surfacing. Remaining: create work items, queue/cancel pipeline runs.
-- **Phase 3 — Analytics** 🔨: live OData aggregates power the Overview (done);
-  OData→Delta ingest job + Genie NL-Q&A tab via the Conversation API (built — needs the
-  human Genie-Space setup, see docs/GENIE.md). Remaining: DORA metrics (lead time,
-  deploy frequency, change-fail rate, MTTR).
-- **Phase 4 — Surfaces (optional)**: Teams tab embedding the app; Tauri Mac wrapper.
+- **Phase 3 — Analytics** ✅: live OData aggregates power the Overview; OData→Delta
+  ingest job (daily 05:00 UTC + on-demand refresh with freshness stamp); Genie Space
+  (API-created) + NL-Q&A tab via the Conversation API — proven end-to-end in the dev
+  workspace 2026-07-01.
+- **Phase 4 — Product depth** 🔨 (current; see §5a): identity + app-state store + audit,
+  full work-item CRUD, Reports tab with filters, dedicated AI tab with session history,
+  report builder, code browser.
+- **Phase 5 — Surfaces (optional)**: Teams tab embedding the app; Tauri Mac wrapper.
+  Also: DORA metrics; hybrid FMAPI copilot (live + historical answers; endpoint name is
+  config — Databricks-served models only).
+
+## 5a. Phase 4 — Product depth (the plan)
+
+Two shared foundations first, then five feature tracks, each landing as its own PR
+through the trunk (GitHub → mirror → ADO PR → pipeline).
+
+**4A — Identity, settings, audit (foundation).**
+- Read the Databricks Apps forwarded-identity headers (`X-Forwarded-Email` /
+  `X-Forwarded-Preferred-Username`) in the BFF → `GET /api/whoami`. Verify header names
+  on first deploy; fall back to the ADO connection identity if absent.
+- App-state store: Delta schema `workspace.ado_companion_app` (settings, audit_log,
+  ai_sessions), written by the app SP via the existing warehouse, behind a small store
+  interface (swap to Lakebase later without touching callers). Async/buffered writes;
+  audit middleware logs every mutating BFF call (who, what, target, when, outcome).
+- UI: user chip (bottom-right of the shell footer) with a settings popover (theme,
+  default project, default date range); settings persist per user.
+- Human steps: grants for the app SP to CREATE/WRITE the new schema (documented in
+  AGENTS.md when built).
+
+**4B — Work items: full input + edit.**
+- Create: "+ New item" opens a panel — type, title, description (markdown), assignee
+  (picker fed by ADO identities), state, tags, iteration/area. POST via existing
+  JSON-Patch create endpoint (`POST /{project}/_apis/wit/workitems/${type}`).
+- Edit: row click opens a detail drawer — edit title/description/assignee/state/tags,
+  view comment history (`GET .../comments`), add comments; all JSON-Patch updates.
+- Backend additions: create_work_item, update_work_item fields beyond state, identity
+  search (assignee picker), comments list, area/iteration paths.
+
+**4C — Analytics tab → Reports.**
+- The Genie chat moves out (→ 4D). Analytics becomes report widgets: state distribution,
+  created vs completed, throughput/week, cycle time, per-assignee workload — each driven
+  by OData `$apply` with shared **filters: assignee(s), work-item type, date range**
+  (the existing 24h/7d/30d control generalizes to a date-range picker).
+- Backend: extend the analytics client with parameterized filters (AssignedTo/UserName,
+  WorkItemType, DateValue/CreatedDate windows).
+
+**4D — AI tab (dedicated) with session history.**
+- New "AI" tab under Insights: the Genie conversation UI moves here.
+- Sessions persist per user in the app-state store (question/answer turns +
+  conversation_id); a left rail lists previous sessions; resuming continues the same
+  Genie conversation where the API allows, else replays context.
+
+**4E — Report builder.**
+- Visual query builder over the OData analytics surface: entity (work items /
+  snapshots), filters, group-bys, aggregate, chart type (table/bar/line/donut).
+  Generates the `$apply` behind the scenes; "run" renders the widget; "save" stores the
+  report definition per user (app-state store); saved reports render on the Reports tab.
+- Explicitly *not* raw WIQL v1 — the OData aggregate surface covers reporting better.
+
+**4F — Code browser.**
+- The Code tab gains actual code: branch picker, repo file tree
+  (`GET .../items?recursionLevel=...`), file viewer with syntax highlighting
+  (lightweight highlighter, lazy-loaded), and blob download. Commits list remains.
+
+**Order: 4A → 4B → 4C → 4D → 4E → 4F** (foundation first; daily-use value next;
+the builder and code browser are the deepest cuts).
 
 ## 6. Open decisions
 
