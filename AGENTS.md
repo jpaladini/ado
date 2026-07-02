@@ -1,14 +1,40 @@
-# AGENTS.md — runbook for an AI coding agent (e.g. Genie Code)
+# AGENTS.md — the complete agent runbook
 
-This file is written for an **autonomous coding agent** to deploy this repo as a
-Databricks App. It is deterministic and idempotent: run the steps in order; re-running
-is safe. Human-readable context is in `README.md` / `PLAN.md`; the full manual runbook
-is `SETUP_DATABRICKS.md`. **Prefer this file when acting as an agent.**
+Written for **any autonomous coding agent** — Databricks Genie Code, Claude Code, or a
+human at a terminal. No specific AI vendor is required to build, deploy, or operate this
+project; **all runtime AI is Databricks-native** (Genie + Foundation Model APIs). Steps
+are deterministic and idempotent: run them in order; re-running is safe. Human context
+lives in `README.md` / `PLAN.md`; manual setup in `SETUP_DATABRICKS.md`; CI/CD in
+`docs/CICD.md`; Genie details in `docs/GENIE.md`. **Prefer this file when acting as an agent.**
 
 ## What this repo is
 A Databricks App: **React (Vite) SPA + FastAPI (Python) backend** that calls the Azure
-DevOps REST API. The built frontend is committed under `src/static/`, so **no Node build
-is required to deploy**. The app source is `src/` (deployed); `frontend/` is source only.
+DevOps REST API (operational plane) and Databricks Genie over ingested Delta tables
+(analytical plane). The built frontend is committed under `src/static/`, so **no Node
+build is required to deploy**. The app source is `src/` (deployed); `frontend/` is source only.
+
+## Secrets reference (scope `ado`, one per workspace)
+All per-environment config is secrets — the code is identical across dev/stg/prod.
+
+| Key | Value | Read by |
+|---|---|---|
+| `ado_org_url` | `https://dev.azure.com/<org>` | app (runtime env via bundle resource) |
+| `ado_pat` | Azure DevOps PAT — Work Items R/W, Code R/W, Build R+Execute | app (runtime env via bundle resource) |
+| `ado_project` | ADO project name (e.g. `home`) | ingest job (fallback when `--project` is empty) — **required before the daily schedule runs** |
+| `genie_space_id` | Genie Space ID (32-hex) | app, looked up at runtime — no redeploy needed |
+
+The app's service principal holds scope-level READ (granted by the bundle's secret
+resources). Creating/updating secret *values* is typically a **HUMAN** step (agents are
+often sandbox-blocked from secret writes): easiest is a workspace notebook —
+`WorkspaceClient().secrets.put_secret("ado", "<key>", string_value="<value>")`.
+
+## Runtime AI policy
+The product calls **only Databricks-hosted AI**: Genie (Conversation API) today; any
+future LLM routing uses a **Foundation Model APIs serving endpoint whose name is config**
+(e.g. `databricks-meta-llama-3-3-70b-instruct`, `databricks-llama-4-maverick`, or the
+Databricks-served Claude endpoints — an org policy choice). Do **not** introduce direct
+external AI-vendor calls (Anthropic/OpenAI/etc. APIs) into the app. Coding agents that
+help build this repo are dev-time tools only and never appear in the runtime path.
 
 ## STEP 0 — Ask the human for inputs FIRST (do this before anything else)
 Before running any command, **prompt the human for the values below and wait for their
@@ -97,6 +123,11 @@ curl -s "<app-url>/api/health"
 Do this **after** the app deploys. Each step is idempotent. Steps marked **HUMAN** must be
 reported back, not attempted.
 
+### G0. HUMAN — set the `ado_project` secret first
+The job's **daily schedule** runs with an empty `--project` and falls back to the
+`ado/ado_project` secret. If that secret is missing, every scheduled run fails with a
+clear SystemExit. Set it before (or right after) the first deploy that includes the job.
+
 ### G1. Run the ingest job
 The bundle deploys a job `ado-analytics-ingest` (dev mode prefixes the name). Trigger it with
 explicit params — `workspace` is the Free Edition catalog; corporate workspaces may use another:
@@ -106,7 +137,7 @@ databricks jobs run-now <job-id> -p "$ENV" \
   --python-params '["--catalog","workspace","--schema","ado_analytics","--project","<ADO project name>"]'
 ```
 Wait for `TERMINATED SUCCESS`. Creates `workspace.ado_analytics.work_items` and
-`…work_item_daily`. Then **unpause** the job's daily schedule.
+`…work_item_daily`. The schedule ships **UNPAUSED** (daily 05:00 UTC) — G0 must be done.
 
 ### G2. HUMAN — grants
 The schema is owned by the deploy principal; both the asking users and the **app's service
@@ -143,12 +174,50 @@ The app reads it at runtime — **no redeploy**.
 Genie UI → the space → **Share** → add the app's service principal (`app-… ado-companion`) →
 **Can Run** (it also needs access to the space's SQL warehouse).
 
-### G6. Verify
+### G6. HUMAN — grants for the freshness stamp + Refresh button (optional)
+The Analytics tab shows *"Data as of <date>"* and a **Refresh now** button. Both degrade
+gracefully (they hide) unless the **app's service principal** gets:
+- **Can use** on the SQL warehouse (SQL Warehouses → Permissions) — powers the freshness query.
+- **Can Manage Run** on the `ado-analytics-ingest` job (job → Permissions) — powers Refresh.
+
+### G7. Verify
 - `GET <app-url>/api/health` → `"genie_configured": true`
 - Analytics tab → ask "How many open work items are there by state?" → answer + table.
 - Direct API check: `w.genie.start_conversation_and_wait(space_id, question)` should return
   `COMPLETED` with a text/query attachment.
+- `GET <app-url>/api/analytics/freshness` → `{"available": true, "asOf": "<date>"}` (after G6).
 
 Failure modes: `INSUFFICIENT_PERMISSIONS … USE SCHEMA` → G2 missing for whoever asked;
 `genie_configured: false` → G4 missing; app's /api/genie/ask fails but direct API works → G5
-missing.
+missing; scheduled ingest fails at startup → G0 missing; freshness bar hidden → G6 missing.
+
+---
+
+## Operational rules (learned in production bring-up — do not relearn these)
+
+1. **One owner per Databricks resource.** The app must be created/updated only by the
+   pipeline's deploy principal. A manual deploy by a human user makes the next pipeline
+   deploy fail with `409 ALREADY_EXISTS` — fix by deleting the app and letting the
+   pipeline recreate it. Never hand-deploy to stg/prod.
+2. **Catalog differs by edition.** Free Edition's default Unity Catalog is `workspace`;
+   corporate metastores usually use `main` or a domain catalog. The ingest job's
+   `--catalog` param and the app's `ANALYTICS_CATALOG` env must match.
+3. **Schema ownership ⇒ grants.** Tables created by the deploy principal are invisible
+   to everyone else (including the app SP and Genie callers) until a human runs the
+   USE SCHEMA / SELECT grants. Genie executes SQL **as the caller**, so grant every
+   principal that will ask questions.
+4. **Spark schema inference breaks on all-NULL columns** (fresh projects have no
+   completed/assigned items). The ingest job uses explicit StructTypes — keep it that way
+   when adding fields.
+5. **CI watchers must key on a specific build id**, not "latest build" — polling `$top=1`
+   right after a merge races the queue and can see the *previous* run's success.
+6. **Mirror + PR flow:** agents push feature branches only; a mirror (if used) lands them
+   in the canonical repo; a **human always completes the PR into dev/stg/prod** — agents
+   must not merge past protected branches even when technically able.
+7. **Secret values, RBAC grants, PR merges, and Genie Space sharing are HUMAN actions.**
+   Sandboxed agents are (correctly) blocked from them; design flows so these are few,
+   explicit, and listed for the human rather than attempted.
+8. **The two data planes drift.** CRUD tabs are live (ADO REST), the Overview is
+   near-live (ADO Analytics OData), Genie is batch (Delta, refreshed by the ingest
+   schedule or the Refresh button). Surface freshness in the UI; never imply Genie
+   answers are real-time.
