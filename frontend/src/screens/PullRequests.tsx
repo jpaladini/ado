@@ -6,12 +6,15 @@ import {
   fetchPrFiles,
   fetchPrThreads,
   fetchPullRequests,
+  reviewPr,
   setPullRequestStatus,
   votePullRequest,
   type PullRequest,
+  type ReviewComment,
 } from "../api";
 import { Card, Empty, ErrorMsg, H1, Loading, Pill, relTime } from "../components/ui";
 import { Drawer, INPUT } from "../components/Drawer";
+import { AIButton, useCopilotConfigured } from "../components/AIButton";
 import { IconCheck, IconChevron } from "../components/icons";
 import { prChip } from "../lib/tokens";
 import { useToast } from "../components/Toast";
@@ -252,6 +255,37 @@ function PRDrawer({
     },
   });
 
+  // -- in-place AI review: suggestions live under each file's diff ---------------
+  const aiOn = useCopilotConfigured();
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [suggestions, setSuggestions] = useState<Record<string, ReviewComment[]>>({});
+  const [reviewSummary, setReviewSummary] = useState<string | null>(null);
+
+  const toggleFile = (path: string) =>
+    setExpanded((s) => {
+      const next = new Set(s);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
+
+  const applyReview = (comments: ReviewComment[], scope?: string) => {
+    const grouped: Record<string, ReviewComment[]> = {};
+    for (const c of comments) (grouped[c.path] ??= []).push(c);
+    setSuggestions((prev) => (scope ? { ...prev, [scope]: grouped[scope] ?? [] } : grouped));
+    // put every suggestion next to its code: expand the files that got comments
+    setExpanded((s) => new Set([...s, ...Object.keys(grouped)]));
+  };
+
+  const review = useMutation({
+    mutationFn: (path?: string) => reviewPr(project, rid, pr.id, path),
+    onSuccess: (r, path) => {
+      applyReview(r.comments, path);
+      if (!path) setReviewSummary(r.summary);
+      toast(r.comments.length ? `${r.comments.length} suggestion${r.comments.length > 1 ? "s" : ""}` : "Nothing to flag");
+    },
+  });
+
   return (
     <Drawer
       width="w-[720px]"
@@ -268,10 +302,25 @@ function PRDrawer({
         <div className="font-mono text-[11.5px] text-faint">
           {pr.sourceRef} → {pr.targetRef} · {pr.createdBy ?? "—"} · {relTime(pr.creationDate)} ago
         </div>
-        <span onClick={(e) => e.stopPropagation()}>
+        <span className="flex items-center gap-[8px]" onClick={(e) => e.stopPropagation()}>
+          {aiOn && (
+            <AIButton
+              label="AI review"
+              busy={review.isPending && review.variables === undefined}
+              onClick={() => review.mutate(undefined)}
+            />
+          )}
           <ActionButtons project={project} pr={pr} approved={approved} onApproved={onApproved} />
         </span>
       </div>
+
+      {review.isError && <ErrorMsg error={review.error} />}
+      {reviewSummary && (
+        <div className="mb-[12px] rounded-[8px] border border-accent-border bg-accent-tint px-[12px] py-[8px] text-[12.5px] text-text">
+          <span className="font-semibold text-accent-text">AI review: </span>
+          {reviewSummary}
+        </div>
+      )}
 
       <div className="mb-[10px] text-[10.5px] font-semibold uppercase tracking-[0.5px] text-faint">
         Files changed {files.data ? `(${files.data.files.length})` : ""}
@@ -279,7 +328,19 @@ function PRDrawer({
       {files.isLoading && <Loading />}
       {files.isError && <ErrorMsg error={files.error} />}
       {files.data?.files.map((f) => (
-        <FileRow key={f.path} project={project} rid={rid} prId={pr.id} file={f} />
+        <FileRow
+          key={f.path}
+          project={project}
+          rid={rid}
+          prId={pr.id}
+          file={f}
+          open={expanded.has(f.path)}
+          onToggle={() => toggleFile(f.path)}
+          suggestions={suggestions[f.path] ?? []}
+          aiOn={aiOn}
+          onReviewFile={() => review.mutate(f.path)}
+          reviewBusy={review.isPending && review.variables === f.path}
+        />
       ))}
       {files.data && files.data.files.length === 0 && (
         <div className="text-[12px] text-faint">No file changes found.</div>
@@ -339,13 +400,24 @@ function FileRow({
   rid,
   prId,
   file,
+  open,
+  onToggle,
+  suggestions,
+  aiOn,
+  onReviewFile,
+  reviewBusy,
 }: {
   project: string;
   rid: string;
   prId: number;
   file: { path: string; originalPath?: string | null; changeType: string };
+  open: boolean;
+  onToggle: () => void;
+  suggestions: ReviewComment[];
+  aiOn: boolean;
+  onReviewFile: () => void;
+  reviewBusy: boolean;
 }) {
-  const [open, setOpen] = useState(false);
   const diff = useQuery({
     queryKey: ["prdiff", project, rid, prId, file.path],
     queryFn: () => fetchPrDiff(project, rid, prId, file.path),
@@ -356,7 +428,7 @@ function FileRow({
   return (
     <div className="mb-[6px] overflow-hidden rounded-[8px] border border-line">
       <button
-        onClick={() => setOpen((o) => !o)}
+        onClick={onToggle}
         className="flex w-full items-center gap-[8px] bg-surface-2 px-[12px] py-[7px] text-left hover:bg-hover"
       >
         <span className={`text-faint transition-transform ${open ? "" : "-rotate-90"}`}>
@@ -372,6 +444,11 @@ function FileRow({
             ? `${file.originalPath} → ${file.path}`
             : file.path}
         </span>
+        {suggestions.length > 0 && (
+          <span className="flex-none rounded-[10px] bg-accent-tint px-[7px] py-[1px] text-[10.5px] font-semibold text-accent-text">
+            ✦ {suggestions.length}
+          </span>
+        )}
         {diff.data && !diff.data.binary && !diff.data.tooLarge && (
           <span className="flex-none font-mono text-[11px]">
             <span className="text-ok">+{diff.data.addedLines}</span>{" "}
@@ -390,9 +467,88 @@ function FileRow({
           {diff.data && !diff.data.binary && !diff.data.tooLarge && (
             <>
               <DiffView diff={diff.data.diff} />
+              {suggestions.map((s, i) => (
+                <SuggestionCard key={`${s.line}-${i}`} project={project} rid={rid} prId={prId} s={s} />
+              ))}
+              <div className="flex items-center justify-between border-t border-line bg-surface-2 px-[10px] py-[5px]">
+                {aiOn ? (
+                  <AIButton label="Review this file" busy={reviewBusy} onClick={onReviewFile} />
+                ) : (
+                  <span />
+                )}
+              </div>
               <InlineFileComment project={project} rid={rid} prId={prId} path={file.path} />
             </>
           )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---- AI review suggestion card (in place, under the diff it belongs to) -----------
+
+const SEVERITY_CHIP: Record<string, string> = {
+  nit: "bg-nbg text-nfg",
+  suggestion: "bg-info-bg text-info",
+  issue: "bg-warn-bg text-warn",
+};
+
+function SuggestionCard({
+  project,
+  rid,
+  prId,
+  s,
+}: {
+  project: string;
+  rid: string;
+  prId: number;
+  s: ReviewComment;
+}) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [status, setStatus] = useState<"pending" | "applied" | "dismissed">("pending");
+
+  const apply = useMutation({
+    mutationFn: () =>
+      createPrThread(project, rid, prId, { comment: s.comment, filePath: s.path, line: s.line }),
+    onSuccess: () => {
+      setStatus("applied");
+      qc.invalidateQueries({ queryKey: ["prthreads", project, rid, prId] });
+      toast("Review comment posted");
+    },
+  });
+
+  if (status === "dismissed") return null;
+
+  return (
+    <div className="border-t border-accent-border bg-accent-tint px-[12px] py-[9px]">
+      <div className="mb-[4px] flex items-center gap-[8px]">
+        <span className={`rounded-[4px] px-[6px] py-[1px] text-[10.5px] font-semibold ${SEVERITY_CHIP[s.severity] ?? SEVERITY_CHIP.suggestion}`}>
+          {s.severity}
+        </span>
+        <span className="font-mono text-[11px] text-faint">line {s.line}</span>
+        {status === "applied" && (
+          <span className="rounded-[10px] bg-ok-bg px-[7px] py-[1px] text-[10.5px] font-semibold text-ok">posted</span>
+        )}
+      </div>
+      <div className="text-[12.5px] text-text">{s.comment}</div>
+      {apply.isError && <div className="mt-[4px] text-[11px] text-danger">{(apply.error as Error).message}</div>}
+      {status === "pending" && (
+        <div className="mt-[8px] flex gap-[6px]">
+          <button
+            onClick={() => apply.mutate()}
+            disabled={apply.isPending}
+            className="rounded-[6px] bg-accent px-[11px] py-[4px] text-[11.5px] font-semibold text-white hover:bg-accent-hover disabled:opacity-50"
+          >
+            {apply.isPending ? "Posting…" : "Post comment"}
+          </button>
+          <button
+            onClick={() => setStatus("dismissed")}
+            className="rounded-[6px] border border-border bg-surface px-[10px] py-[4px] text-[11.5px] font-medium text-text-3 hover:bg-hover"
+          >
+            Dismiss
+          </button>
         </div>
       )}
     </div>

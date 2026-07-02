@@ -3,7 +3,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   addWorkItemComment,
   createWorkItem,
-  fetchHealth,
   fetchIterations,
   fetchWorkItemComments,
   fetchWorkItemDetail,
@@ -20,7 +19,8 @@ import {
 } from "../api";
 import { Card, Empty, ErrorMsg, H1, Loading, relTime } from "../components/ui";
 import { Drawer, Field, INPUT, Select } from "../components/Drawer";
-import { IconChevron, IconSearch, IconX, Spark } from "../components/icons";
+import { AIButton, useCopilotConfigured } from "../components/AIButton";
+import { IconChevron, IconSearch, IconX } from "../components/icons";
 import { stateChip, tagChip, typeDot } from "../lib/tokens";
 import { htmlToText, textToHtml } from "../lib/text";
 import { useToast } from "../components/Toast";
@@ -198,40 +198,6 @@ function Row({ project, wi, onOpen }: { project: string; wi: WorkItem; onOpen: (
       <td className="px-[18px] py-[9px] text-right font-mono text-faint">{relTime(wi.changedDate)}</td>
     </tr>
   );
-}
-
-// ---- AI suggestion button ---------------------------------------------------------
-
-/** Renders next to a Field label; only shown when the copilot endpoint is configured. */
-function AIButton({
-  label,
-  busy,
-  disabled,
-  onClick,
-}: {
-  label: string;
-  busy: boolean;
-  disabled?: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={busy || disabled}
-      className={`inline-flex items-center gap-[5px] rounded-[6px] border border-border bg-surface px-[8px] py-[3px] text-[11px] font-semibold text-text-3 hover:border-faint hover:text-accent-text disabled:opacity-50 ${busy ? "animate-pulse" : ""}`}
-    >
-      <span className="text-accent">
-        <Spark size={11} />
-      </span>
-      {busy ? "Thinking…" : label}
-    </button>
-  );
-}
-
-function useCopilotConfigured(): boolean {
-  const health = useQuery({ queryKey: ["health"], queryFn: fetchHealth, staleTime: 60_000 });
-  return health.data?.copilot_configured === true;
 }
 
 /** Merge a suggestion's description + acceptance criteria into one textarea value. */

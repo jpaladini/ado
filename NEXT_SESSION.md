@@ -128,7 +128,15 @@ things (Jason's merges lagged the session, so commits stacked on the open PR):
    get_pr_file_diff, list_pr_threads, get_file windowed; write proposals:
    comment_on_pr, comment_on_pr_file w/ PR-target verification). Live-smoked:
    "review the open PR" → real diff reads → file-anchored comment proposal.
-3. **Blog website handoff brief** (docs/blog/WEBSITE_HANDOFF.md).
+3. **In-place AI review** (Jason's ask: AI review inside the PR tab, not just chat):
+   "AI review" button in the PR drawer header + "Review this file" per diff →
+   POST /api/ai/review-pr (`ai.review_pr`): server fetches the diffs itself, one
+   forced function call, then **validates every suggested line against the actual
+   right-side hunk lines** (clamp/drop — hallucinated line numbers are structurally
+   impossible). Suggestions render as severity-chipped cards UNDER each file's diff
+   with Post comment / Dismiss; Post goes through the normal threads route
+   (pr.comment audit). ai.review audit + MLflow span.
+4. **Blog website handoff brief** (docs/blog/WEBSITE_HANDOFF.md).
 
 **Next up: 4C → 4E** (full detail in PLAN.md §5a):
 - **4C — Reports** *(START HERE next)*: Analytics tab → report widgets w/ assignee/type/date filters (OData).

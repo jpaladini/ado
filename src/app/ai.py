@@ -12,9 +12,10 @@ import re
 from typing import Any
 
 from app import copilot
+from app.ado.client import ADOClient
 from app.copilot import CopilotNotConfigured, _content_text, _schema, _span, resolve_endpoint
 
-__all__ = ["suggest_work_item", "SuggestionParseError", "CopilotNotConfigured"]
+__all__ = ["suggest_work_item", "review_pr", "SuggestionParseError", "CopilotNotConfigured"]
 
 log = logging.getLogger(__name__)
 
@@ -118,6 +119,196 @@ def _normalize(raw: dict[str, Any]) -> dict[str, str]:
     if not out.get("title") and not out.get("description"):
         raise SuggestionParseError("suggestion had neither title nor description")
     return out
+
+
+# -- in-place PR review ------------------------------------------------------------
+#
+# One forced function call over server-fetched diffs. Because *we* hand the model
+# the diff text, we can also validate every suggested line number against the
+# actual right-side lines of the hunks — suggestions pointing at lines that are
+# not part of the change are clamped to the nearest changed line or dropped.
+
+REVIEW_MAX_FILES = 10
+REVIEW_DIFF_CHARS = 4000  # per-file diff budget in the prompt
+SEVERITIES = ("nit", "suggestion", "issue")
+
+_REVIEW_TOOL = _schema(
+    "suggest_review_comments",
+    "Return the code review: an overall summary plus zero or more line-anchored comments.",
+    {
+        "summary": {"type": "string", "description": "1-3 sentences on the change overall."},
+        "comments": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "File path exactly as given."},
+                    "line": {"type": "integer", "description": "RIGHT-side (new file) line number of a + line in that file's diff."},
+                    "comment": {"type": "string", "description": "Concise, actionable, specific."},
+                    "severity": {"type": "string", "enum": list(SEVERITIES)},
+                },
+                "required": ["path", "line", "comment", "severity"],
+            },
+        },
+    },
+    ["summary", "comments"],
+)
+
+_REVIEW_SYSTEM = (
+    "You are a careful senior code reviewer. You receive unified diffs for a pull "
+    "request and respond by calling suggest_review_comments exactly once. Rules:\n"
+    "- Comment ONLY where something is genuinely worth flagging: bugs, risky edge "
+    "cases, security issues, dead code, naming that will confuse. No praise comments, "
+    "no restating the diff.\n"
+    "- At most 4 comments per file; zero is a fine answer for a clean diff.\n"
+    "- line must be the RIGHT-side (new-file) line number of a '+' line you can see "
+    "in that file's hunk headers. path must match exactly.\n"
+    "- severity: nit (style), suggestion (would improve), issue (should fix).\n"
+    "- Keep the summary to 1-3 plain sentences."
+)
+
+
+def right_side_lines(diff: str) -> set[int]:
+    """Right-side (new file) line numbers of '+' lines in a unified diff —
+    the only lines a review comment can be anchored to."""
+    commentable: set[int] = set()
+    new_ln = 0
+    for line in diff.split("\n"):
+        m = re.match(r"@@ -\d+(?:,\d+)? \+(\d+)", line)
+        if m:
+            new_ln = int(m.group(1))
+            continue
+        if line.startswith("+++") or line.startswith("---"):
+            continue
+        if line.startswith("+"):
+            commentable.add(new_ln)
+            new_ln += 1
+        elif line.startswith("-"):
+            continue
+        else:
+            new_ln += 1
+    return commentable
+
+
+def _validate_comments(
+    raw: list[dict[str, Any]], lines_by_path: dict[str, set[int]]
+) -> tuple[list[dict[str, Any]], int]:
+    """Keep only comments whose target file was reviewed; clamp line numbers to the
+    nearest actually-changed line. Returns (valid_comments, dropped_count)."""
+    valid: list[dict[str, Any]] = []
+    dropped = 0
+    for c in raw:
+        path = str(c.get("path") or "")
+        text = str(c.get("comment") or "").strip()
+        allowed = lines_by_path.get(path)
+        if not allowed and path and not path.startswith("/"):
+            path = f"/{path}"
+            allowed = lines_by_path.get(path)
+        if not allowed or not text:
+            dropped += 1
+            continue
+        try:
+            line = int(c.get("line") or 0)
+        except (TypeError, ValueError):
+            line = 0
+        if line not in allowed:
+            line = min(allowed, key=lambda n: abs(n - line))  # clamp to nearest + line
+        severity = str(c.get("severity") or "suggestion")
+        valid.append(
+            {
+                "path": path,
+                "line": line,
+                "comment": text,
+                "severity": severity if severity in SEVERITIES else "suggestion",
+            }
+        )
+    return valid, dropped
+
+
+def _extract_review(msg: dict[str, Any]) -> dict[str, Any]:
+    for tc in msg.get("tool_calls") or []:
+        fn = tc.get("function") or {}
+        if fn.get("name") == "suggest_review_comments":
+            try:
+                return json.loads(fn.get("arguments") or "{}")
+            except json.JSONDecodeError:
+                pass
+    text = _content_text(msg.get("content")).strip()
+    if text.startswith("{"):
+        try:
+            loaded = json.loads(text)
+            if isinstance(loaded, dict):
+                return loaded
+        except json.JSONDecodeError:
+            pass
+    raise SuggestionParseError("no review tool call or JSON object in the model response")
+
+
+async def review_pr(
+    project: str, repo_id: str, pr_id: int, path: str | None = None
+) -> dict[str, Any]:
+    """Review a PR's diffs (or a single file when path is given). Returns
+    {summary, comments: [{path, line, comment, severity}], filesReviewed,
+    skipped, dropped, endpoint}. Nothing is posted — the UI applies each
+    suggestion through the normal PR-thread route."""
+    endpoint = resolve_endpoint()
+    c = ADOClient()
+    info = await c.pr_files(project, repo_id, pr_id)
+    files = [f for f in info["files"] if not path or f["path"] == path][:REVIEW_MAX_FILES]
+
+    sections: list[str] = []
+    lines_by_path: dict[str, set[int]] = {}
+    skipped: list[str] = []
+    for f in files:
+        d = await c.pr_file_diff(project, repo_id, pr_id, f["path"])
+        if d.get("binary") or d.get("tooLarge") or not d.get("diff"):
+            skipped.append(f["path"])
+            continue
+        diff_text = d["diff"][:REVIEW_DIFF_CHARS]
+        lines_by_path[f["path"]] = right_side_lines(diff_text)
+        sections.append(f"### {f['path']} ({f.get('changeType')})\n{diff_text}")
+
+    if not sections:
+        return {
+            "summary": "Nothing reviewable — only binary, oversized, or empty diffs.",
+            "comments": [],
+            "filesReviewed": 0,
+            "skipped": skipped,
+            "dropped": 0,
+            "endpoint": endpoint,
+        }
+
+    messages = [
+        {"role": "system", "content": _REVIEW_SYSTEM},
+        {"role": "user", "content": f"Pull request !{pr_id} diffs:\n\n" + "\n\n".join(sections)},
+    ]
+
+    with _span("ai.review", endpoint=endpoint, project=project) as span:
+        if span:
+            span.set_inputs({"prId": pr_id, "path": path, "files": list(lines_by_path)})
+        data = await copilot._invoke(
+            endpoint,
+            messages,
+            [_REVIEW_TOOL],
+            tool_choice={"type": "function", "function": {"name": "suggest_review_comments"}},
+            temperature=0.2,
+            max_tokens=3000,
+        )
+        msg = (data.get("choices") or [{}])[0].get("message") or {}
+        review = _extract_review(msg)
+        comments, dropped = _validate_comments(list(review.get("comments") or []), lines_by_path)
+        if span:
+            span.set_outputs({"comments": len(comments), "dropped": dropped,
+                              "summary": str(review.get("summary") or "")[:300]})
+
+    return {
+        "summary": str(review.get("summary") or "").strip(),
+        "comments": comments,
+        "filesReviewed": len(lines_by_path),
+        "skipped": skipped,
+        "dropped": dropped,
+        "endpoint": endpoint,
+    }
 
 
 async def suggest_work_item(project: str, draft: dict[str, Any]) -> dict[str, Any]:

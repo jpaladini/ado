@@ -75,6 +75,124 @@ async def test_prose_only_raises(monkeypatch):
         await ai.suggest_work_item("home", {"title": "t"})
 
 
+# -- PR review ---------------------------------------------------------------------
+
+DIFF = (
+    "--- a/src/x.py\n"
+    "+++ b/src/x.py\n"
+    "@@ -1,3 +1,4 @@\n"
+    " keep\n"
+    "+added line 2\n"
+    " keep\n"
+    "+added line 4\n"
+    "@@ -10,2 +11,3 @@\n"
+    " keep\n"
+    "+added line 12\n"
+    " keep\n"
+)
+
+
+def test_right_side_lines_multi_hunk():
+    assert ai.right_side_lines(DIFF) == {2, 4, 12}
+
+
+def test_validate_comments_clamps_and_drops():
+    lines = {"/src/x.py": {2, 4, 12}}
+    raw = [
+        {"path": "/src/x.py", "line": 4, "comment": "exact", "severity": "issue"},
+        {"path": "src/x.py", "line": 99, "comment": "clamped + slash-normalized", "severity": "weird"},
+        {"path": "/other.py", "line": 1, "comment": "unknown file", "severity": "nit"},
+        {"path": "/src/x.py", "line": 2, "comment": "", "severity": "nit"},
+    ]
+    valid, dropped = ai._validate_comments(raw, lines)
+    assert dropped == 2  # unknown file + empty comment
+    assert valid[0] == {"path": "/src/x.py", "line": 4, "comment": "exact", "severity": "issue"}
+    assert valid[1]["line"] == 12  # 99 clamped to nearest changed line
+    assert valid[1]["severity"] == "suggestion"  # invalid severity normalized
+
+
+class _ReviewADO:
+    def __init__(self, *a, **k):
+        pass
+
+    async def pr_files(self, project, repo_id, pr_id):
+        return {
+            "iteration": 2,
+            "sourceCommit": "s",
+            "targetCommit": "t",
+            "files": [
+                {"path": "/src/x.py", "originalPath": None, "changeType": "edit"},
+                {"path": "/logo.png", "originalPath": None, "changeType": "edit"},
+            ],
+        }
+
+    async def pr_file_diff(self, project, repo_id, pr_id, path):
+        if path == "/logo.png":
+            return {"path": path, "binary": True, "diff": "", "addedLines": 0, "removedLines": 0}
+        return {"path": path, "binary": False, "diff": DIFF, "addedLines": 3, "removedLines": 0}
+
+
+@pytest.mark.asyncio
+async def test_review_pr_end_to_end(monkeypatch):
+    monkeypatch.setattr(ai, "ADOClient", _ReviewADO)
+    msg = {
+        "tool_calls": [{
+            "function": {
+                "name": "suggest_review_comments",
+                "arguments": json.dumps({
+                    "summary": "Small change, one concern.",
+                    "comments": [
+                        {"path": "/src/x.py", "line": 999, "comment": "check bounds", "severity": "issue"},
+                    ],
+                }),
+            }
+        }]
+    }
+    monkeypatch.setattr(copilot, "_invoke", _fake_invoke(msg))
+
+    out = await ai.review_pr("home", "r1", 12)
+    assert out["filesReviewed"] == 1
+    assert out["skipped"] == ["/logo.png"]  # binary skipped
+    assert out["comments"][0]["line"] in {2, 4, 12}  # 999 clamped
+    assert out["summary"] == "Small change, one concern."
+
+
+@pytest.mark.asyncio
+async def test_review_pr_path_filter(monkeypatch):
+    calls = []
+
+    class TrackingADO(_ReviewADO):
+        async def pr_file_diff(self, project, repo_id, pr_id, path):
+            calls.append(path)
+            return await super().pr_file_diff(project, repo_id, pr_id, path)
+
+    monkeypatch.setattr(ai, "ADOClient", TrackingADO)
+    msg = {"tool_calls": [{"function": {"name": "suggest_review_comments",
+                                        "arguments": json.dumps({"summary": "ok", "comments": []})}}]}
+    monkeypatch.setattr(copilot, "_invoke", _fake_invoke(msg))
+
+    out = await ai.review_pr("home", "r1", 12, path="/src/x.py")
+    assert calls == ["/src/x.py"]  # only the requested file was diffed
+    assert out["comments"] == []
+
+
+@pytest.mark.asyncio
+async def test_review_pr_nothing_reviewable(monkeypatch):
+    class BinaryOnlyADO(_ReviewADO):
+        async def pr_files(self, project, repo_id, pr_id):
+            return {"iteration": 1, "sourceCommit": "s", "targetCommit": "t",
+                    "files": [{"path": "/logo.png", "originalPath": None, "changeType": "edit"}]}
+
+    monkeypatch.setattr(ai, "ADOClient", BinaryOnlyADO)
+
+    async def must_not_call(*a, **k):
+        raise AssertionError("model must not be invoked with no reviewable diffs")
+
+    monkeypatch.setattr(copilot, "_invoke", must_not_call)
+    out = await ai.review_pr("home", "r1", 12)
+    assert out["filesReviewed"] == 0 and out["comments"] == []
+
+
 @pytest.mark.asyncio
 async def test_draft_lands_in_prompt(monkeypatch):
     captured: dict = {}

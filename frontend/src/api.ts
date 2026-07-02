@@ -343,6 +343,27 @@ export const createPrThread = (
   send<{ id: number }>(
     `/api/projects/${enc(p)}/repos/${enc(rid)}/pullrequests/${prId}/threads`, "POST", body);
 
+export interface ReviewComment {
+  path: string;
+  line: number;
+  comment: string;
+  severity: "nit" | "suggestion" | "issue";
+}
+
+export interface PrReview {
+  summary: string;
+  comments: ReviewComment[];
+  filesReviewed: number;
+  skipped: string[];
+  dropped: number;
+  endpoint: string;
+}
+
+export const reviewPr = (p: string, rid: string, prId: number, path?: string) =>
+  send<PrReview>("/api/ai/review-pr", "POST", {
+    project: p, repositoryId: rid, prId, ...(path ? { path } : {}),
+  });
+
 // -- writes -------------------------------------------------------------------
 
 export const setWorkItemState = (p: string, id: number, state: string) =>

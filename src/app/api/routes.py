@@ -324,6 +324,30 @@ async def ai_suggest_workitem(body: SuggestBody) -> dict[str, object]:
         raise HTTPException(status_code=502, detail="Could not reach the model endpoint")
 
 
+class ReviewBody(BaseModel):
+    project: str
+    repositoryId: str
+    prId: int
+    path: str | None = None
+
+
+@router.post("/ai/review-pr")
+async def ai_review_pr(body: ReviewBody) -> dict[str, object]:
+    try:
+        return await ai.review_pr(body.project, body.repositoryId, body.prId, body.path)
+    except ai.CopilotNotConfigured as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except ai.SuggestionParseError as e:
+        raise HTTPException(status_code=502, detail=f"Model returned no usable review: {e}")
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(
+            status_code=e.response.status_code if e.response.status_code == 404 else 502,
+            detail=f"Review failed: upstream returned {e.response.status_code}",
+        )
+    except httpx.HTTPError:
+        raise HTTPException(status_code=502, detail="Could not reach Azure DevOps or the model endpoint")
+
+
 # -- writes -------------------------------------------------------------------
 
 
