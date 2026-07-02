@@ -32,6 +32,9 @@ log = logging.getLogger(__name__)
 SECRET_SCOPE = "ado"
 MAX_TURNS = 8  # model-call iterations per user message
 TOOL_RESULT_LIMIT = 6000  # chars of tool output fed back to the model
+DIFF_LINE_LIMIT = 300  # max diff lines fed to the model per file
+DIFF_CHAR_LIMIT = 5000  # < TOOL_RESULT_LIMIT so json.dumps never chops mid-structure
+FILE_LINE_LIMIT = 200  # default get_file window
 
 
 class CopilotNotConfigured(RuntimeError):
@@ -183,6 +186,47 @@ READ_TOOLS: list[dict[str, Any]] = [
         [],
     ),
     _schema(
+        "list_pr_files",
+        "Files changed in a pull request (path, changeType).",
+        {
+            "prId": {"type": "integer"},
+            "repositoryId": {"type": "string", "description": "From list_pull_requests results — never guess."},
+        },
+        ["prId", "repositoryId"],
+    ),
+    _schema(
+        "get_pr_file_diff",
+        "Unified diff for one file in a PR (may be truncated; includes +/- line counts). "
+        "Line numbers on '+' lines are the RIGHT side — use them for comment_on_pr_file.",
+        {
+            "prId": {"type": "integer"},
+            "repositoryId": {"type": "string", "description": "From list_pull_requests results — never guess."},
+            "path": {"type": "string", "description": "File path from list_pr_files."},
+        },
+        ["prId", "repositoryId", "path"],
+    ),
+    _schema(
+        "list_pr_threads",
+        "Existing review comment threads on a PR (file-anchored and general).",
+        {
+            "prId": {"type": "integer"},
+            "repositoryId": {"type": "string", "description": "From list_pull_requests results — never guess."},
+        },
+        ["prId", "repositoryId"],
+    ),
+    _schema(
+        "get_file",
+        "Read a file from a repo branch (windowed to 200 lines; pass startLine/endLine for more).",
+        {
+            "repositoryId": {"type": "string", "description": "From list_pull_requests or the repos list."},
+            "path": {"type": "string"},
+            "branch": {"type": "string", "description": "Defaults to the repo's default branch."},
+            "startLine": {"type": "integer"},
+            "endLine": {"type": "integer"},
+        },
+        ["repositoryId", "path"],
+    ),
+    _schema(
         "query_analytics_history",
         "Ask Databricks Genie a natural-language BI question over the INGESTED analytics "
         "tables (Delta, refreshed daily — NOT real-time). Use for trends, history, and "
@@ -213,10 +257,72 @@ WRITE_TOOLS: list[dict[str, Any]] = [
         {"id": {"type": "integer"}, "text": {"type": "string"}},
         ["id", "text"],
     ),
+    _schema(
+        "comment_on_pr",
+        "PROPOSE a general comment on a pull request. Not executed immediately.",
+        {
+            "prId": {"type": "integer"},
+            "repositoryId": {"type": "string", "description": "From list_pull_requests results — never guess."},
+            "comment": {"type": "string"},
+        },
+        ["prId", "repositoryId", "comment"],
+    ),
+    _schema(
+        "comment_on_pr_file",
+        "PROPOSE a review comment anchored to a file+line in a PR. Use a line number "
+        "from the RIGHT (new) side of a diff you actually read. Not executed immediately.",
+        {
+            "prId": {"type": "integer"},
+            "repositoryId": {"type": "string", "description": "From list_pull_requests results — never guess."},
+            "path": {"type": "string"},
+            "line": {"type": "integer"},
+            "comment": {"type": "string"},
+        },
+        ["prId", "repositoryId", "path", "line", "comment"],
+    ),
 ]
 
 WRITE_TOOL_NAMES = {t["function"]["name"] for t in WRITE_TOOLS}
 ALL_TOOLS = READ_TOOLS + WRITE_TOOLS
+
+
+def _truncate_diff(d: dict[str, Any]) -> dict[str, Any]:
+    """Cap a diff payload for the model, cutting on line boundaries only."""
+    diff = d.get("diff") or ""
+    lines = diff.split("\n")
+    total = len(lines)
+    kept: list[str] = []
+    chars = 0
+    for line in lines[:DIFF_LINE_LIMIT]:
+        if chars + len(line) + 1 > DIFF_CHAR_LIMIT:
+            break
+        kept.append(line)
+        chars += len(line) + 1
+    if len(kept) < total:
+        d = {
+            **d,
+            "diff": "\n".join(kept),
+            "truncatedNote": (
+                f"diff truncated: showing {len(kept)} of {total} lines — "
+                "use get_file with startLine/endLine to read specific regions"
+            ),
+        }
+    return d
+
+
+def _window_file(f: dict[str, Any], start: int | None, end: int | None) -> dict[str, Any]:
+    """Slice file content to a line window (1-indexed, inclusive)."""
+    lines = (f.get("content") or "").split("\n")
+    total = len(lines)
+    lo = max(1, int(start or 1))
+    hi = min(total, int(end or (lo + FILE_LINE_LIMIT - 1)))
+    return {
+        "path": f.get("path"),
+        "binary": f.get("binary", False),
+        "lines": f"{lo}-{hi}",
+        "totalLines": total,
+        "content": "\n".join(lines[lo - 1 : hi]),
+    }
 
 
 async def _run_read_tool(name: str, args: dict[str, Any], project: str) -> Any:
@@ -241,6 +347,24 @@ async def _run_read_tool(name: str, args: dict[str, Any], project: str) -> Any:
             "note": "Data is batch (refreshed daily / on demand), not real-time.",
         }
     c = ADOClient()
+    if name == "list_pr_files":
+        return await c.pr_files(project, str(args["repositoryId"]), int(args["prId"]))
+    if name == "get_pr_file_diff":
+        d = await c.pr_file_diff(project, str(args["repositoryId"]), int(args["prId"]), str(args["path"]))
+        return _truncate_diff(d)
+    if name == "list_pr_threads":
+        return await c.list_pr_threads(project, str(args["repositoryId"]), int(args["prId"]))
+    if name == "get_file":
+        rid = str(args["repositoryId"])
+        branch = args.get("branch")
+        if not branch:
+            repos = await c.list_repos(project)
+            match = next((r for r in repos if r["id"] == rid or r["name"] == rid), None)
+            branch = (match or {}).get("defaultBranch") or "main"
+        f = await c.get_file(project, rid, str(args["path"]), version=str(branch))
+        if f["binary"]:
+            return {"path": f["path"], "binary": True}
+        return _window_file(f, args.get("startLine"), args.get("endLine"))
     if name == "list_work_items":
         return await c.list_work_items(project, top=min(int(args.get("top") or 50), 200))
     if name == "get_work_item":
@@ -279,6 +403,10 @@ Rules:
   what the user applied or dismissed and what failed — use it to decide next steps
   and never re-propose something already applied.
 - Before assigning anyone, resolve their email with search_identities.
+- For PR review: list_pull_requests → list_pr_files → get_pr_file_diff per file you
+  care about; propose feedback with comment_on_pr_file anchored to RIGHT-side line
+  numbers you actually saw in a diff, or comment_on_pr for overall notes. Never guess
+  prId or repositoryId — both come from list_pull_requests results.
 - Two data planes: read tools are LIVE; query_analytics_history is BATCH (Delta,
   refreshed daily). Use it for trends/history and say so when you do — never present
   batch numbers as real-time.
@@ -287,22 +415,42 @@ Rules:
 
 
 async def _verify_write_target(name: str, args: dict[str, Any], project: str) -> str | None:
-    """Reject proposals that target a work item that doesn't exist (models
-    sometimes assume sequential IDs). Returns an error string, or None if OK."""
-    if name not in ("update_work_item", "add_work_item_comment") or args.get("id") is None:
-        return None
-    try:
-        await ADOClient().get_work_item(int(args["id"]))
-        return None
-    except httpx.HTTPStatusError as e:
-        if e.response.status_code == 404:
+    """Reject proposals that target something that doesn't exist (models sometimes
+    assume sequential IDs). Returns an error string, or None if OK."""
+    if name in ("update_work_item", "add_work_item_comment") and args.get("id") is not None:
+        try:
+            await ADOClient().get_work_item(int(args["id"]))
+            return None
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                return (
+                    f"Work item {args['id']} does not exist. Do not guess IDs — call "
+                    "list_work_items or get_work_item to find the real ones, then re-propose."
+                )
+            return f"Could not verify work item {args['id']}: ADO returned {e.response.status_code}"
+        except Exception as e:
+            return f"Could not verify work item {args['id']}: {e}"
+
+    if name in ("comment_on_pr", "comment_on_pr_file"):
+        if args.get("prId") is None or not args.get("repositoryId"):
             return (
-                f"Work item {args['id']} does not exist. Do not guess IDs — call "
-                "list_work_items or get_work_item to find the real ones, then re-propose."
+                "comment_on_pr* needs prId and repositoryId from list_pull_requests "
+                "results — look them up first."
             )
-        return f"Could not verify work item {args['id']}: ADO returned {e.response.status_code}"
-    except Exception as e:
-        return f"Could not verify work item {args['id']}: {e}"
+        try:
+            await ADOClient().get_pull_request(project, str(args["repositoryId"]), int(args["prId"]))
+            return None
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                return (
+                    f"PR {args['prId']} does not exist in that repository. "
+                    "Call list_pull_requests to find the real id, then re-propose."
+                )
+            return f"Could not verify PR {args['prId']}: ADO returned {e.response.status_code}"
+        except Exception as e:
+            return f"Could not verify PR {args['prId']}: {e}"
+
+    return None
 
 
 async def _invoke(

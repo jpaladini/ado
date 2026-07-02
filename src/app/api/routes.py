@@ -139,6 +139,67 @@ async def commits(project: str, repo_id: str, top: int = Query(25, le=100)) -> d
     return {"value": await _call(lambda c: c.list_commits(project, repo_id, top=top))}
 
 
+# -- code browsing ----------------------------------------------------------------
+
+
+@router.get("/projects/{project}/repos/{repo_id}/branches")
+async def branches(project: str, repo_id: str) -> dict[str, object]:
+    return {"value": await _call(lambda c: c.list_branches(project, repo_id))}
+
+
+@router.get("/projects/{project}/repos/{repo_id}/tree")
+async def tree(project: str, repo_id: str, branch: str = Query(...), path: str = Query("/")) -> dict[str, object]:
+    return {"value": await _call(lambda c: c.get_tree(project, repo_id, branch, path))}
+
+
+@router.get("/projects/{project}/repos/{repo_id}/file")
+async def file_content(
+    project: str, repo_id: str, path: str = Query(..., min_length=1), branch: str = Query(...)
+) -> dict[str, object]:
+    return await _call(lambda c: c.get_file(project, repo_id, path, version=branch))
+
+
+# -- pull request review ------------------------------------------------------------
+
+
+@router.get("/projects/{project}/repos/{repo_id}/pullrequests/{pr_id}/files")
+async def pr_files(project: str, repo_id: str, pr_id: int) -> dict[str, object]:
+    return await _call(lambda c: c.pr_files(project, repo_id, pr_id))
+
+
+@router.get("/projects/{project}/repos/{repo_id}/pullrequests/{pr_id}/diff")
+async def pr_diff(
+    project: str, repo_id: str, pr_id: int, path: str = Query(..., min_length=1)
+) -> dict[str, object]:
+    return await _call(lambda c: c.pr_file_diff(project, repo_id, pr_id, path))
+
+
+@router.get("/projects/{project}/repos/{repo_id}/pullrequests/{pr_id}/threads")
+async def pr_threads(project: str, repo_id: str, pr_id: int) -> dict[str, object]:
+    return {"value": await _call(lambda c: c.list_pr_threads(project, repo_id, pr_id))}
+
+
+class PrThreadBody(BaseModel):
+    comment: str
+    filePath: str | None = None
+    line: int | None = None
+
+
+@router.post("/projects/{project}/repos/{repo_id}/pullrequests/{pr_id}/threads")
+async def create_pr_thread(
+    project: str, repo_id: str, pr_id: int, body: PrThreadBody
+) -> dict[str, object]:
+    if not body.comment.strip():
+        raise HTTPException(status_code=422, detail="Comment is empty")
+    if body.line is not None and not body.filePath:
+        raise HTTPException(status_code=422, detail="line requires filePath")
+    return await _call(
+        lambda c: c.create_pr_thread(
+            project, repo_id, pr_id, body.comment.strip(), body.filePath, body.line
+        )
+    )
+
+
 # -- identity, settings, audit ----------------------------------------------------
 
 

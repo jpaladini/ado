@@ -116,6 +116,53 @@ ROUTES = {
             }
         ]
     },
+    ("GET", "/Demo/_apis/git/repositories/r1/refs"): {
+        "value": [
+            {"name": "refs/heads/main", "objectId": "aaa111"},
+            {"name": "refs/heads/dev", "objectId": "bbb222"},
+        ]
+    },
+    ("GET", "/Demo/_apis/git/repositories/r1/items"): lambda req: _items_handler(req),
+    ("GET", "/Demo/_apis/git/repositories/r1/pullRequests/12"): {
+        "pullRequestId": 12,
+        "title": "Refactor",
+        "status": "active",
+        "sourceRefName": "refs/heads/feat",
+        "targetRefName": "refs/heads/main",
+        "lastMergeSourceCommit": {"commitId": "headcommit"},
+        "lastMergeTargetCommit": {"commitId": "basecommit"},
+    },
+    ("GET", "/Demo/_apis/git/repositories/r1/pullRequests/12/iterations"): {
+        "value": [
+            {"id": 1, "sourceRefCommit": {"commitId": "old"}, "targetRefCommit": {"commitId": "older"}},
+            {"id": 2, "sourceRefCommit": {"commitId": "headcommit"}, "targetRefCommit": {"commitId": "basecommit"}},
+        ]
+    },
+    ("GET", "/Demo/_apis/git/repositories/r1/pullRequests/12/iterations/2/changes"): {
+        "changeEntries": [
+            {"changeType": "edit", "item": {"path": "/src/app.py", "gitObjectType": "blob"}},
+            {"changeType": "rename", "originalPath": "/old.md", "item": {"path": "/new.md", "gitObjectType": "blob"}},
+            {"changeType": "edit", "item": {"path": "/src", "gitObjectType": "tree"}},
+            {"changeType": "add", "item": {"path": "/added.txt", "gitObjectType": "blob"}},
+            {"changeType": "edit", "item": {"path": "/logo.png", "gitObjectType": "blob"}},
+        ]
+    },
+    ("GET", "/Demo/_apis/git/repositories/r1/pullRequests/12/threads"): {
+        "value": [
+            {"id": 1, "comments": [{"id": 1, "commentType": "system", "content": "joined"}]},
+            {
+                "id": 2,
+                "status": "active",
+                "threadContext": {"filePath": "/src/app.py", "rightFileStart": {"line": 7, "offset": 1}},
+                "comments": [
+                    {"id": 10, "commentType": "text", "content": "nit: rename this",
+                     "author": {"displayName": "Lin"}, "publishedDate": "2026-07-01T00:00:00Z"},
+                    {"id": 11, "commentType": "text", "content": "deleted one", "isDeleted": True},
+                ],
+            },
+            {"id": 3, "isDeleted": True, "comments": [{"commentType": "text", "content": "gone"}]},
+        ]
+    },
     ("GET", "/Demo/_apis/git/repositories/r1/commits"): {
         "value": [
             {
@@ -128,9 +175,38 @@ ROUTES = {
 }
 
 
+def _items_handler(req: httpx.Request):
+    """/items serves both trees (recursionLevel) and file content (includeContent),
+    keyed further by version for PR diff sides."""
+    p = req.url.params
+    if p.get("recursionLevel"):
+        scope = p.get("scopePath") or "/"
+        return {
+            "value": [
+                {"path": scope, "isFolder": True},  # self-echo, must be dropped
+                {"path": f"{scope.rstrip('/')}/zebra.py", "gitObjectType": "blob", "size": 10},
+                {"path": f"{scope.rstrip('/')}/alpha", "isFolder": True, "gitObjectType": "tree"},
+                {"path": f"{scope.rstrip('/')}/beta.md", "gitObjectType": "blob", "size": 5},
+            ]
+        }
+    version = p.get("versionDescriptor.version")
+    path = p.get("path")
+    if path == "/logo.png":
+        return {"path": path, "objectId": "bin1"}  # no content key → binary
+    if path == "/added.txt" and version == "basecommit":
+        return httpx.Response(404, json={"message": "not found"})
+    if version == "basecommit":
+        return {"path": path, "content": "line1\nline2\n", "objectId": "o1", "commitId": version}
+    return {"path": path, "content": "line1\nline2 changed\nline3\n", "objectId": "o2", "commitId": version}
+
+
 def _handler(request: httpx.Request) -> httpx.Response:
     body = ROUTES.get((request.method, request.url.path))
     assert body is not None, f"unexpected {request.method} {request.url.path}"
+    if callable(body):  # param-dependent payloads (e.g. /items tree vs file) or 404s
+        body = body(request)
+    if isinstance(body, httpx.Response):
+        return body
     return httpx.Response(200, json=body)
 
 
@@ -209,6 +285,83 @@ async def test_comments_list(client: ADOClient):
     assert comments[0]["createdBy"] == "Lin"
 
 
+# -- code browsing & PR review -------------------------------------------------
+
+
+def test_unified_diff_pure():
+    from app.ado.client import unified_diff
+
+    edit = unified_diff("a\nb\nc", "a\nB\nc", "/f.py")
+    assert edit["addedLines"] == 1 and edit["removedLines"] == 1
+    assert "+B" in edit["diff"] and "-b" in edit["diff"] and "a/f.py" in edit["diff"]
+
+    add = unified_diff(None, "x\ny", "/new.txt")
+    assert add["addedLines"] == 2 and add["removedLines"] == 0
+
+    delete = unified_diff("x\ny", None, "/gone.txt")
+    assert delete["removedLines"] == 2 and delete["addedLines"] == 0
+
+    same = unified_diff("x", "x", "/same.txt")
+    assert same["diff"] == "" and same["addedLines"] == 0
+
+
+@pytest.mark.asyncio
+async def test_branches(client: ADOClient):
+    branches = await client.list_branches("Demo", "r1")
+    assert branches == [
+        {"name": "main", "objectId": "aaa111"},
+        {"name": "dev", "objectId": "bbb222"},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_tree_drops_self_and_sorts_folders_first(client: ADOClient):
+    tree = await client.get_tree("Demo", "r1", "main", "/src")
+    assert [e["name"] for e in tree] == ["alpha", "beta.md", "zebra.py"]
+    assert tree[0]["isFolder"] is True and tree[1]["isFolder"] is False
+
+
+@pytest.mark.asyncio
+async def test_get_file_text_and_binary(client: ADOClient):
+    f = await client.get_file("Demo", "r1", "/src/app.py")
+    assert f["binary"] is False and "line1" in f["content"]
+    b = await client.get_file("Demo", "r1", "/logo.png")
+    assert b["binary"] is True and b["content"] == ""
+
+
+@pytest.mark.asyncio
+async def test_pr_files_latest_iteration(client: ADOClient):
+    info = await client.pr_files("Demo", "r1", 12)
+    assert info["iteration"] == 2  # latest wins
+    assert info["sourceCommit"] == "headcommit" and info["targetCommit"] == "basecommit"
+    paths = [f["path"] for f in info["files"]]
+    assert "/src" not in paths  # tree entries dropped
+    rename = next(f for f in info["files"] if f["changeType"] == "rename")
+    assert rename["originalPath"] == "/old.md" and rename["path"] == "/new.md"
+
+
+@pytest.mark.asyncio
+async def test_pr_file_diff_edit_add_binary(client: ADOClient):
+    edit = await client.pr_file_diff("Demo", "r1", 12, "/src/app.py")
+    assert edit["binary"] is False and edit["addedLines"] >= 1 and "-line2" in edit["diff"]
+
+    added = await client.pr_file_diff("Demo", "r1", 12, "/added.txt")  # base side 404s
+    assert added["removedLines"] == 0 and added["addedLines"] >= 1
+
+    binary = await client.pr_file_diff("Demo", "r1", 12, "/logo.png")
+    assert binary["binary"] is True and binary["diff"] == ""
+
+
+@pytest.mark.asyncio
+async def test_pr_threads_filtering(client: ADOClient):
+    threads = await client.list_pr_threads("Demo", "r1", 12)
+    assert len(threads) == 1  # system-only + deleted threads dropped
+    t = threads[0]
+    assert t["filePath"] == "/src/app.py" and t["line"] == 7
+    assert [c["content"] for c in t["comments"]] == ["nit: rename this"]
+    assert t["comments"][0]["author"] == "Lin"
+
+
 # -- writes: assert the outgoing request is constructed correctly -------------
 
 
@@ -282,6 +435,27 @@ async def test_add_comment_encodes_project(capturing):
     assert method == "POST"
     assert "My%20Proj" in raw  # percent-encoded on the wire
     assert json.loads(body) == {"text": "looks good"}
+
+
+@pytest.mark.asyncio
+async def test_create_pr_thread_requests(capturing):
+    import json
+
+    client, cap = capturing
+    # general comment: no threadContext
+    await client.create_pr_thread("Proj", "r1", 7, "looks good overall")
+    method, path, _raw, _headers, body = cap[-1]
+    assert method == "POST" and path.endswith("/pullRequests/7/threads")
+    sent = json.loads(body)
+    assert sent["comments"] == [{"parentCommentId": 0, "content": "looks good overall", "commentType": 1}]
+    assert "threadContext" not in sent
+
+    # file-anchored: threadContext + leading-slash normalization
+    await client.create_pr_thread("Proj", "r1", 7, "nit", file_path="src/x.py", line=42)
+    sent = json.loads(cap[-1][4])
+    assert sent["threadContext"]["filePath"] == "/src/x.py"
+    assert sent["threadContext"]["rightFileStart"] == {"line": 42, "offset": 1}
+    assert sent["threadContext"]["rightFileEnd"] == {"line": 42, "offset": 1}
 
 
 @pytest.mark.asyncio

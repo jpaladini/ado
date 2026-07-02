@@ -159,10 +159,18 @@ live operational plane:
   report definition per user (app-state store); saved reports render on the Reports tab.
 - Explicitly *not* raw WIQL v1 — the OData aggregate surface covers reporting better.
 
-**4F — Code browser.**
-- The Code tab gains actual code: branch picker, repo file tree
-  (`GET .../items?recursionLevel=...`), file viewer with syntax highlighting
-  (lightweight highlighter, lazy-loaded), and blob download. Commits list remains.
+**4F — Code browser + AI PR review.** *(shipped 2026-07-02, pulled ahead of 4C/4E
+because it unlocks the copilot's PR-review tools)*
+- Code tab: branch picker, lazy per-folder file tree, file viewer with
+  syntax highlighting (highlight.js, dynamically imported — Vite splits it into
+  lazy chunks). Commits list remains as the no-selection state.
+- Pull Requests: row click → detail drawer — files changed w/ change chips and
+  +/− counts, per-file unified diffs (computed server-side with stdlib difflib),
+  comment threads (system events filtered), general + file-anchored commenting.
+- Copilot: read tools list_pr_files / get_pr_file_diff (truncated for the model) /
+  list_pr_threads / get_file (line-windowed); write proposals comment_on_pr /
+  comment_on_pr_file with PR-target verification. "Review the open PR" verified
+  live end-to-end.
 
 **Order: 4A → 4B → 4C → 4D → 4E → 4F** (foundation first; daily-use value next;
 the builder and code browser are the deepest cuts).

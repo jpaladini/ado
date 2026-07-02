@@ -114,19 +114,23 @@ says activity log **on** and a state change lands a row in
 - **PR #9 (Phase 4B — work items full CRUD)** and **PR #10 (Genie empty-table fix:
   rows now fetched from statement result chunks)** — both merged & deployed 2026-07-02.
 
-**In flight:**
-- **Phase 4D — AI Copilot v1** (PR #11, branch `claude/resume-next-session-pbbmrk`):
-  tool-calling agent over FMAPI (`/api/copilot/chat`, `src/app/copilot.py`), AI tab UI
-  with read-tool chips + propose-then-apply cards, MLflow turn tracing. Re-scoped from
-  "Genie chat tab" after Jason's direction: the AI must *act* (create/edit/clean up
-  items, later PR review + artifacts), not just answer. Full runbook + design contract
-  in AGENTS.md "AI Copilot activation" (written so Databricks Genie Code can implement/
-  activate it in an enterprise workspace unaided). After merge, Jason sets secrets
-  `ado/copilot_endpoint` (= databricks-llama-4-maverick) + `ado/mlflow_experiment_id`
-  (= 3567576457281688) and grants the app SP CAN_EDIT on the experiment + confirms
-  endpoint query access (C1–C3 in AGENTS.md).
+- **PR #11 (4D copilot)**, **PR #12 (copilot hardening + Genie-as-tool)**,
+  **PR #13 (blog parts 3+4)** — merged & deployed 2026-07-02. Copilot secrets set,
+  traces flowing to experiment 3567576457281688.
 
-**Next up: 4C → 4E → 4F** (full detail in PLAN.md §5a):
+**In flight — PR #14** (branch `claude/resume-next-session-pbbmrk`) carries THREE
+things (Jason's merges lagged the session, so commits stacked on the open PR):
+1. **AI work-item enrichment**: "Draft with AI" (create drawer) / "Improve with AI"
+   (edit drawer) via POST /api/ai/suggest-workitem (`src/app/ai.py`, ai.suggest audit).
+2. **4F code browser + AI PR review**: Code tab 3-pane (branch picker, lazy tree,
+   highlight.js viewer); PR detail drawer (files/diffs/threads/comments, diffs via
+   stdlib difflib server-side); copilot PR tools (read: list_pr_files,
+   get_pr_file_diff, list_pr_threads, get_file windowed; write proposals:
+   comment_on_pr, comment_on_pr_file w/ PR-target verification). Live-smoked:
+   "review the open PR" → real diff reads → file-anchored comment proposal.
+3. **Blog website handoff brief** (docs/blog/WEBSITE_HANDOFF.md).
+
+**Next up: 4C → 4E** (full detail in PLAN.md §5a):
 - **4C — Reports** *(START HERE next)*: Analytics tab → report widgets w/ assignee/type/date filters (OData).
 - **4D — AI tab**: move Genie chat to dedicated tab + per-user session history (store).
 - **4E — Report builder**: visual OData query builder + saved reports (store).

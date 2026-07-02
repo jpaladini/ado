@@ -115,3 +115,40 @@ body {
 .animate-toast-in {
   animation: toast-in 0.18s ease-out;
 }
+
+/* ---- highlight.js theme (maps onto the design tokens; light + dark for free) */
+.hljs-comment,
+.hljs-quote {
+  color: var(--faint);
+  font-style: italic;
+}
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-tag {
+  color: var(--purple);
+}
+.hljs-string,
+.hljs-regexp,
+.hljs-addition {
+  color: var(--ok);
+}
+.hljs-number,
+.hljs-literal,
+.hljs-attr,
+.hljs-meta {
+  color: var(--warn);
+}
+.hljs-title,
+.hljs-name,
+.hljs-selector-id,
+.hljs-selector-class {
+  color: var(--info);
+}
+.hljs-built_in,
+.hljs-type,
+.hljs-symbol {
+  color: var(--accent-text);
+}
+.hljs-deletion {
+  color: var(--danger);
+}

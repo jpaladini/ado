@@ -259,6 +259,90 @@ export const fetchRepos = (p: string) =>
 export const fetchCommits = (p: string, repoId: string) =>
   get<{ value: Commit[] }>(`/api/projects/${enc(p)}/repos/${enc(repoId)}/commits`);
 
+// -- code browsing & PR review ---------------------------------------------------
+
+export interface Branch {
+  name: string;
+  objectId: string;
+}
+
+export interface TreeEntry {
+  path: string;
+  name: string;
+  isFolder: boolean;
+  size?: number;
+}
+
+export interface FileContent {
+  path: string;
+  content: string;
+  binary: boolean;
+  truncated: boolean;
+  commitId?: string;
+}
+
+export interface PrFile {
+  path: string;
+  originalPath?: string | null;
+  changeType: string;
+}
+
+export interface PrFiles {
+  iteration: number | null;
+  sourceCommit: string | null;
+  targetCommit: string | null;
+  files: PrFile[];
+}
+
+export interface PrDiff {
+  path: string;
+  diff: string;
+  binary: boolean;
+  tooLarge?: boolean;
+  addedLines: number;
+  removedLines: number;
+  changeType?: string | null;
+}
+
+export interface PrThreadComment {
+  id: number;
+  author: string | null;
+  content: string;
+  publishedDate?: string;
+}
+
+export interface PrThread {
+  id: number;
+  status: string | null;
+  filePath: string | null;
+  line: number | null;
+  comments: PrThreadComment[];
+}
+
+export const fetchBranches = (p: string, rid: string) =>
+  get<{ value: Branch[] }>(`/api/projects/${enc(p)}/repos/${enc(rid)}/branches`);
+export const fetchTree = (p: string, rid: string, branch: string, path = "/") =>
+  get<{ value: TreeEntry[] }>(
+    `/api/projects/${enc(p)}/repos/${enc(rid)}/tree?branch=${enc(branch)}&path=${enc(path)}`);
+export const fetchFile = (p: string, rid: string, path: string, branch: string) =>
+  get<FileContent>(
+    `/api/projects/${enc(p)}/repos/${enc(rid)}/file?path=${enc(path)}&branch=${enc(branch)}`);
+export const fetchPrFiles = (p: string, rid: string, prId: number) =>
+  get<PrFiles>(`/api/projects/${enc(p)}/repos/${enc(rid)}/pullrequests/${prId}/files`);
+export const fetchPrDiff = (p: string, rid: string, prId: number, path: string) =>
+  get<PrDiff>(
+    `/api/projects/${enc(p)}/repos/${enc(rid)}/pullrequests/${prId}/diff?path=${enc(path)}`);
+export const fetchPrThreads = (p: string, rid: string, prId: number) =>
+  get<{ value: PrThread[] }>(`/api/projects/${enc(p)}/repos/${enc(rid)}/pullrequests/${prId}/threads`);
+export const createPrThread = (
+  p: string,
+  rid: string,
+  prId: number,
+  body: { comment: string; filePath?: string; line?: number },
+) =>
+  send<{ id: number }>(
+    `/api/projects/${enc(p)}/repos/${enc(rid)}/pullrequests/${prId}/threads`, "POST", body);
+
 // -- writes -------------------------------------------------------------------
 
 export const setWorkItemState = (p: string, id: number, state: string) =>

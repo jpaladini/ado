@@ -118,17 +118,26 @@ async def test_history_and_reasoning_content_blocks(monkeypatch):
     assert roles == ["system", "user", "assistant", "user"]
 
 
+def _http404(url: str) -> httpx.HTTPStatusError:
+    req = httpx.Request("GET", url)
+    return httpx.HTTPStatusError("404", request=req, response=httpx.Response(404, request=req))
+
+
 class _FakeADO:
-    """get_work_item 404s for id 999, succeeds otherwise."""
+    """get_work_item / get_pull_request 404 for id 999, succeed otherwise."""
 
     def __init__(self, *a, **k):
         pass
 
     async def get_work_item(self, wid):
         if wid == 999:
-            req = httpx.Request("GET", "https://ado/_apis/wit/workitems/999")
-            raise httpx.HTTPStatusError("404", request=req, response=httpx.Response(404, request=req))
+            raise _http404("https://ado/_apis/wit/workitems/999")
         return {"id": wid, "title": "exists"}
+
+    async def get_pull_request(self, project, repo_id, pr_id):
+        if pr_id == 999:
+            raise _http404("https://ado/_apis/git/pullRequests/999")
+        return {"id": pr_id, "title": "a pr", "status": "active"}
 
 
 @pytest.mark.asyncio
@@ -190,6 +199,79 @@ async def test_create_proposal_skips_verification(monkeypatch):
 
     out = await copilot.chat("home", "make a task")
     assert len(out["proposals"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_pr_comment_proposal_verified(monkeypatch):
+    """A comment on a real PR becomes a proposal; PR 999 or missing repositoryId is rejected."""
+    responses = iter([
+        _mk_response(tool_calls=[
+            _tc("c1", "comment_on_pr_file", {"prId": 12, "repositoryId": "r1", "path": "/src/app.py", "line": 7, "comment": "nit"}),
+            _tc("c2", "comment_on_pr", {"prId": 999, "repositoryId": "r1", "comment": "hello"}),
+            _tc("c3", "comment_on_pr", {"prId": 12, "comment": "no repo id"}),
+        ]),
+        _mk_response(content="Proposed one comment; the other targets were invalid."),
+    ])
+    sent = []
+
+    async def fake_invoke(endpoint, messages, tools):
+        sent.append(list(messages))
+        return next(responses)
+
+    monkeypatch.setattr(copilot, "_invoke", fake_invoke)
+    monkeypatch.setattr(copilot, "ADOClient", _FakeADO)
+
+    out = await copilot.chat("home", "review pr 12")
+    assert out["proposals"] == [{
+        "id": "p1",
+        "tool": "comment_on_pr_file",
+        "args": {"prId": 12, "repositoryId": "r1", "path": "/src/app.py", "line": 7, "comment": "nit"},
+    }]
+    fed_back = "".join(m["content"] for m in sent[1] if m["role"] == "tool")
+    assert "does not exist" in fed_back  # PR 999
+    assert "look them up first" in fed_back  # missing repositoryId
+
+
+def test_truncate_diff():
+    short = {"diff": "+a\n-b", "addedLines": 1, "removedLines": 1}
+    assert copilot._truncate_diff(short) == short  # untouched
+
+    long = {"diff": "\n".join(f"+line {i}" for i in range(1000))}
+    cut = copilot._truncate_diff(long)
+    kept = cut["diff"].split("\n")
+    assert len(kept) <= copilot.DIFF_LINE_LIMIT
+    assert len(cut["diff"]) <= copilot.DIFF_CHAR_LIMIT
+    assert "truncated" in cut["truncatedNote"]
+    assert kept[-1].startswith("+line")  # cut on a line boundary
+
+
+def test_window_file():
+    f = {"path": "/x.py", "binary": False, "content": "\n".join(str(i) for i in range(1, 501))}
+    default = copilot._window_file(f, None, None)
+    assert default["lines"] == f"1-{copilot.FILE_LINE_LIMIT}" and default["totalLines"] == 500
+    window = copilot._window_file(f, 250, 260)
+    assert window["content"].split("\n") == [str(i) for i in range(250, 261)]
+
+
+@pytest.mark.asyncio
+async def test_text_form_pr_comment_lifted(monkeypatch):
+    """_TOOL_NAME_ALT picked up the new tool names for the llama text fallback."""
+    responses = iter([
+        _mk_response(content='comment_on_pr(prId=12, repositoryId="r1", comment="nit")\n\nDone.'),
+        _mk_response(content="Proposed."),
+    ])
+
+    async def fake_invoke(endpoint, messages, tools):
+        return next(responses)
+
+    monkeypatch.setattr(copilot, "_invoke", fake_invoke)
+    monkeypatch.setattr(copilot, "ADOClient", _FakeADO)
+
+    out = await copilot.chat("home", "comment on pr 12")
+    assert out["proposals"] == [{
+        "id": "p1", "tool": "comment_on_pr",
+        "args": {"prId": 12, "repositoryId": "r1", "comment": "nit"},
+    }]
 
 
 @pytest.mark.asyncio

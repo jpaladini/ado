@@ -1,8 +1,18 @@
 import { useState } from "react";
-import { useMutation, useQueries, useQueryClient } from "@tanstack/react-query";
-import { fetchPullRequests, setPullRequestStatus, votePullRequest, type PullRequest } from "../api";
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  createPrThread,
+  fetchPrDiff,
+  fetchPrFiles,
+  fetchPrThreads,
+  fetchPullRequests,
+  setPullRequestStatus,
+  votePullRequest,
+  type PullRequest,
+} from "../api";
 import { Card, Empty, ErrorMsg, H1, Loading, Pill, relTime } from "../components/ui";
-import { IconCheck } from "../components/icons";
+import { Drawer, INPUT } from "../components/Drawer";
+import { IconCheck, IconChevron } from "../components/icons";
 import { prChip } from "../lib/tokens";
 import { useToast } from "../components/Toast";
 
@@ -12,6 +22,7 @@ type Status = (typeof STATUSES)[number];
 export default function PullRequests({ project }: { project: string }) {
   const [status, setStatus] = useState<Status>("active");
   const [approved, setApproved] = useState<Set<number>>(new Set());
+  const [openPr, setOpenPr] = useState<PullRequest | null>(null);
 
   // one query per status → gives us list + chip counts together
   const results = useQueries({
@@ -59,29 +70,30 @@ export default function PullRequests({ project }: { project: string }) {
               pr={pr}
               approved={approved.has(pr.id)}
               onApproved={() => setApproved((s) => new Set(s).add(pr.id))}
+              onOpen={() => setOpenPr(pr)}
             />
           ))}
           {active.data.value.length === 0 && <Empty>No {status} pull requests.</Empty>}
         </Card>
       )}
+
+      {openPr && (
+        <PRDrawer
+          project={project}
+          pr={openPr}
+          approved={approved.has(openPr.id)}
+          onApproved={() => setApproved((s) => new Set(s).add(openPr.id))}
+          onClose={() => setOpenPr(null)}
+        />
+      )}
     </div>
   );
 }
 
-function Row({
-  project,
-  pr,
-  approved,
-  onApproved,
-}: {
-  project: string;
-  pr: PullRequest;
-  approved: boolean;
-  onApproved: () => void;
-}) {
+/** Approve / abandon / reactivate mutations, shared by the row and the drawer. */
+function usePrActions(project: string, pr: PullRequest, onApproved: () => void) {
   const qc = useQueryClient();
   const toast = useToast();
-  const invalidate = () => qc.invalidateQueries({ queryKey: ["prs", project] });
   const repoId = pr.repositoryId;
 
   const vote = useMutation({
@@ -94,25 +106,27 @@ function Row({
   const setStatusMut = useMutation({
     mutationFn: (s: string) => setPullRequestStatus(project, repoId!, pr.id, s),
     onSuccess: (_d, s) => {
-      invalidate();
+      qc.invalidateQueries({ queryKey: ["prs", project] });
       toast(`PR !${pr.id} ${s === "abandoned" ? "abandoned" : "reactivated"}`);
     },
   });
-  const busy = vote.isPending || setStatusMut.isPending;
-  const canAct = !!repoId;
+  return { vote, setStatusMut, busy: vote.isPending || setStatusMut.isPending, canAct: !!repoId };
+}
 
+function ActionButtons({
+  project,
+  pr,
+  approved,
+  onApproved,
+}: {
+  project: string;
+  pr: PullRequest;
+  approved: boolean;
+  onApproved: () => void;
+}) {
+  const { vote, setStatusMut, busy, canAct } = usePrActions(project, pr, onApproved);
   return (
-    <div className="flex items-center gap-3 border-t border-line px-[18px] py-[13px] hover:bg-hover">
-      <span className="w-[42px] flex-none font-mono text-[12px] text-faint">!{pr.id}</span>
-      <div className="min-w-0 flex-1">
-        <div className="truncate text-[13px] font-medium text-text">{pr.title}</div>
-        <div className="mt-[2px] font-mono text-[11px] text-faint">
-          {pr.sourceRef} → {pr.targetRef}
-        </div>
-      </div>
-      {pr.isDraft && <Pill className="bg-nbg text-nfg">draft</Pill>}
-      <Pill className={prChip(pr.status, pr.isDraft)}>{pr.status}</Pill>
-
+    <>
       {canAct && pr.status === "active" && !approved && (
         <div className="flex gap-[7px]">
           <button
@@ -146,11 +160,316 @@ function Row({
           Reactivate
         </button>
       )}
+    </>
+  );
+}
+
+function Row({
+  project,
+  pr,
+  approved,
+  onApproved,
+  onOpen,
+}: {
+  project: string;
+  pr: PullRequest;
+  approved: boolean;
+  onApproved: () => void;
+  onOpen: () => void;
+}) {
+  return (
+    <div
+      onClick={onOpen}
+      className="flex cursor-pointer items-center gap-3 border-t border-line px-[18px] py-[13px] hover:bg-hover"
+    >
+      <span className="w-[42px] flex-none font-mono text-[12px] text-faint">!{pr.id}</span>
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-[13px] font-medium text-text">{pr.title}</div>
+        <div className="mt-[2px] font-mono text-[11px] text-faint">
+          {pr.sourceRef} → {pr.targetRef}
+        </div>
+      </div>
+      {pr.isDraft && <Pill className="bg-nbg text-nfg">draft</Pill>}
+      <Pill className={prChip(pr.status, pr.isDraft)}>{pr.status}</Pill>
+
+      <span onClick={(e) => e.stopPropagation()}>
+        <ActionButtons project={project} pr={pr} approved={approved} onApproved={onApproved} />
+      </span>
 
       <span className="w-[72px] flex-none text-right text-[12px] text-text-3">{pr.createdBy ?? "—"}</span>
       <span className="w-[44px] flex-none text-right font-mono text-[11px] text-faint">
         {relTime(pr.creationDate)}
       </span>
+    </div>
+  );
+}
+
+// ---- PR detail drawer: files, diffs, threads ---------------------------------------
+
+function changeChip(changeType: string): string {
+  const t = (changeType || "").toLowerCase();
+  if (t.includes("add")) return "bg-ok-bg text-ok";
+  if (t.includes("delete")) return "bg-danger-bg text-danger";
+  if (t.includes("rename")) return "bg-purple-bg text-purple";
+  return "bg-warn-bg text-warn"; // edit
+}
+
+function PRDrawer({
+  project,
+  pr,
+  approved,
+  onApproved,
+  onClose,
+}: {
+  project: string;
+  pr: PullRequest;
+  approved: boolean;
+  onApproved: () => void;
+  onClose: () => void;
+}) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const rid = pr.repositoryId!;
+
+  const files = useQuery({
+    queryKey: ["prfiles", project, rid, pr.id],
+    queryFn: () => fetchPrFiles(project, rid, pr.id),
+    enabled: !!rid,
+  });
+  const threads = useQuery({
+    queryKey: ["prthreads", project, rid, pr.id],
+    queryFn: () => fetchPrThreads(project, rid, pr.id),
+    enabled: !!rid,
+  });
+
+  const [comment, setComment] = useState("");
+  const commentMut = useMutation({
+    mutationFn: (t: string) => createPrThread(project, rid, pr.id, { comment: t }),
+    onSuccess: () => {
+      setComment("");
+      qc.invalidateQueries({ queryKey: ["prthreads", project, rid, pr.id] });
+      toast("Comment added");
+    },
+  });
+
+  return (
+    <Drawer
+      width="w-[720px]"
+      onClose={onClose}
+      title={
+        <span className="inline-flex items-center gap-[10px]">
+          <span className="font-mono text-faint">!{pr.id}</span>
+          <span className="max-w-[380px] truncate">{pr.title}</span>
+          <Pill className={prChip(pr.status, pr.isDraft)}>{pr.status}</Pill>
+        </span>
+      }
+    >
+      <div className="mb-[14px] flex items-center justify-between">
+        <div className="font-mono text-[11.5px] text-faint">
+          {pr.sourceRef} → {pr.targetRef} · {pr.createdBy ?? "—"} · {relTime(pr.creationDate)} ago
+        </div>
+        <span onClick={(e) => e.stopPropagation()}>
+          <ActionButtons project={project} pr={pr} approved={approved} onApproved={onApproved} />
+        </span>
+      </div>
+
+      <div className="mb-[10px] text-[10.5px] font-semibold uppercase tracking-[0.5px] text-faint">
+        Files changed {files.data ? `(${files.data.files.length})` : ""}
+      </div>
+      {files.isLoading && <Loading />}
+      {files.isError && <ErrorMsg error={files.error} />}
+      {files.data?.files.map((f) => (
+        <FileRow key={f.path} project={project} rid={rid} prId={pr.id} file={f} />
+      ))}
+      {files.data && files.data.files.length === 0 && (
+        <div className="text-[12px] text-faint">No file changes found.</div>
+      )}
+
+      <div className="mt-[22px] border-t border-line pt-[14px]">
+        <div className="mb-[10px] text-[10.5px] font-semibold uppercase tracking-[0.5px] text-faint">
+          Comments {threads.data ? `(${threads.data.value.length})` : ""}
+        </div>
+        <div className="mb-[12px] flex items-start gap-[8px]">
+          <textarea
+            value={comment}
+            onChange={(e) => setComment(e.target.value)}
+            placeholder="Add a comment…"
+            rows={2}
+            className={`${INPUT} flex-1 resize-none`}
+          />
+          <button
+            onClick={() => comment.trim() && commentMut.mutate(comment.trim())}
+            disabled={commentMut.isPending || !comment.trim()}
+            className="rounded-[7px] bg-accent px-[13px] py-[8px] text-[12px] font-semibold text-white hover:bg-accent-hover disabled:opacity-50"
+          >
+            Send
+          </button>
+        </div>
+        {commentMut.isError && <ErrorMsg error={commentMut.error} />}
+        {threads.isLoading && <Loading label="Loading comments…" />}
+        {threads.data?.value.map((t) => (
+          <div key={t.id} className="mb-[10px] rounded-[8px] border border-line bg-bg p-[10px_12px]">
+            {t.filePath && (
+              <div className="mb-[6px] inline-block rounded-[4px] bg-nbg px-[6px] py-[1px] font-mono text-[10.5px] text-nfg">
+                {t.filePath}
+                {t.line ? `:${t.line}` : ""}
+              </div>
+            )}
+            {t.comments.map((c) => (
+              <div key={c.id} className="mb-[6px] last:mb-0">
+                <div className="mb-[2px] flex items-center justify-between text-[11px]">
+                  <span className="font-semibold text-text-2">{c.author ?? "—"}</span>
+                  <span className="font-mono text-faint">{relTime(c.publishedDate)}</span>
+                </div>
+                <div className="whitespace-pre-wrap text-[12.5px] text-text-2">{c.content}</div>
+              </div>
+            ))}
+          </div>
+        ))}
+        {threads.data && threads.data.value.length === 0 && (
+          <div className="text-[12px] text-faint">No comments yet.</div>
+        )}
+      </div>
+    </Drawer>
+  );
+}
+
+function FileRow({
+  project,
+  rid,
+  prId,
+  file,
+}: {
+  project: string;
+  rid: string;
+  prId: number;
+  file: { path: string; originalPath?: string | null; changeType: string };
+}) {
+  const [open, setOpen] = useState(false);
+  const diff = useQuery({
+    queryKey: ["prdiff", project, rid, prId, file.path],
+    queryFn: () => fetchPrDiff(project, rid, prId, file.path),
+    enabled: open,
+    staleTime: 60_000,
+  });
+
+  return (
+    <div className="mb-[6px] overflow-hidden rounded-[8px] border border-line">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full items-center gap-[8px] bg-surface-2 px-[12px] py-[7px] text-left hover:bg-hover"
+      >
+        <span className={`text-faint transition-transform ${open ? "" : "-rotate-90"}`}>
+          <IconChevron size={10} />
+        </span>
+        <span
+          className={`rounded-[4px] px-[6px] py-[1px] text-[10.5px] font-semibold ${changeChip(file.changeType)}`}
+        >
+          {(file.changeType || "edit").replace(/,.*$/, "")}
+        </span>
+        <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-text">
+          {file.originalPath && file.originalPath !== file.path
+            ? `${file.originalPath} → ${file.path}`
+            : file.path}
+        </span>
+        {diff.data && !diff.data.binary && !diff.data.tooLarge && (
+          <span className="flex-none font-mono text-[11px]">
+            <span className="text-ok">+{diff.data.addedLines}</span>{" "}
+            <span className="text-danger">−{diff.data.removedLines}</span>
+          </span>
+        )}
+      </button>
+      {open && (
+        <div>
+          {diff.isLoading && <Loading label="Loading diff…" />}
+          {diff.isError && <ErrorMsg error={diff.error} />}
+          {diff.data?.binary && <div className="px-[12px] py-[8px] text-[12px] text-faint">Binary file.</div>}
+          {diff.data?.tooLarge && (
+            <div className="px-[12px] py-[8px] text-[12px] text-warn">File too large to diff.</div>
+          )}
+          {diff.data && !diff.data.binary && !diff.data.tooLarge && (
+            <>
+              <DiffView diff={diff.data.diff} />
+              <InlineFileComment project={project} rid={rid} prId={prId} path={file.path} />
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DiffView({ diff }: { diff: string }) {
+  if (!diff) return <div className="px-[12px] py-[8px] text-[12px] text-faint">No changes.</div>;
+  return (
+    <div className="overflow-x-auto font-mono text-[11.5px] leading-[18px]">
+      {diff.split("\n").map((line, i) => {
+        let cls = "text-text-2";
+        if (line.startsWith("+++") || line.startsWith("---")) cls = "text-faint";
+        else if (line.startsWith("@@")) cls = "text-info bg-info-bg";
+        else if (line.startsWith("+")) cls = "bg-ok-bg text-ok";
+        else if (line.startsWith("-")) cls = "bg-danger-bg text-danger";
+        return (
+          <div key={i} className={`whitespace-pre px-[12px] ${cls}`}>
+            {line || " "}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function InlineFileComment({
+  project,
+  rid,
+  prId,
+  path,
+}: {
+  project: string;
+  rid: string;
+  prId: number;
+  path: string;
+}) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [line, setLine] = useState("");
+  const [text, setText] = useState("");
+  const mut = useMutation({
+    mutationFn: () =>
+      createPrThread(project, rid, prId, {
+        comment: text.trim(),
+        filePath: path,
+        ...(line.trim() ? { line: Number(line) } : {}),
+      }),
+    onSuccess: () => {
+      setText("");
+      setLine("");
+      qc.invalidateQueries({ queryKey: ["prthreads", project, rid, prId] });
+      toast("Comment added");
+    },
+  });
+  return (
+    <div className="flex items-center gap-[6px] border-t border-line bg-surface-2 px-[10px] py-[7px]">
+      <input
+        value={line}
+        onChange={(e) => setLine(e.target.value.replace(/\D/g, ""))}
+        placeholder="line"
+        className="w-[64px] flex-none rounded-[7px] border border-border bg-bg px-[6px] py-[5px] text-center text-[12.5px] text-text outline-none placeholder:text-faint focus:border-faint"
+      />
+      <input
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        placeholder="Comment on this file…"
+        className={`${INPUT} flex-1 py-[5px]`}
+      />
+      <button
+        onClick={() => text.trim() && mut.mutate()}
+        disabled={mut.isPending || !text.trim()}
+        className="rounded-[6px] bg-accent px-[11px] py-[5px] text-[11.5px] font-semibold text-white hover:bg-accent-hover disabled:opacity-50"
+      >
+        Post
+      </button>
+      {mut.isError && <span className="text-[11px] text-danger">{(mut.error as Error).message}</span>}
     </div>
   );
 }

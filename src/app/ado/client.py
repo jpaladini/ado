@@ -5,6 +5,7 @@ is persisted locally. Auth is PAT-based (Basic auth with an empty username), whi
 mirrors the original mobile app; corporate will swap this for Entra OAuth.
 """
 import base64
+import difflib
 import json as jsonlib
 from typing import Any
 from urllib.parse import quote
@@ -14,6 +15,26 @@ import httpx
 from app.config import settings
 
 API_VERSION = "7.1"
+
+# Files larger than this are flagged truncated (UI) / tooLarge (diffs).
+MAX_FILE_CHARS = 200_000
+
+
+def unified_diff(old: str | None, new: str | None, path: str) -> dict[str, Any]:
+    """Unified diff between two file versions; None on either side means the
+    file was added/deleted. Returns the diff text plus +/- line counts."""
+    lines = list(
+        difflib.unified_diff(
+            (old or "").splitlines(),
+            (new or "").splitlines(),
+            fromfile=f"a{path}",
+            tofile=f"b{path}",
+            lineterm="",
+        )
+    )
+    added = sum(1 for l in lines if l.startswith("+") and not l.startswith("+++"))
+    removed = sum(1 for l in lines if l.startswith("-") and not l.startswith("---"))
+    return {"diff": "\n".join(lines), "addedLines": added, "removedLines": removed}
 
 
 class ADOConfigError(RuntimeError):
@@ -330,6 +351,175 @@ class ADOClient:
             for r in data.get("value", [])
         ]
 
+    # -- code browsing ----------------------------------------------------------
+
+    async def list_branches(self, project: str, repo_id: str) -> list[dict[str, Any]]:
+        proj, rid = quote(project, safe=""), quote(repo_id, safe="")
+        data = await self._get(
+            f"/{proj}/_apis/git/repositories/{rid}/refs", params={"filter": "heads/"}
+        )
+        return [
+            {"name": r["name"].removeprefix("refs/heads/"), "objectId": r.get("objectId")}
+            for r in data.get("value", [])
+        ]
+
+    async def get_tree(
+        self, project: str, repo_id: str, branch: str, scope_path: str = "/"
+    ) -> list[dict[str, Any]]:
+        """One level of a repo tree at scope_path (lazy expansion — never Full)."""
+        proj, rid = quote(project, safe=""), quote(repo_id, safe="")
+        data = await self._get(
+            f"/{proj}/_apis/git/repositories/{rid}/items",
+            params={
+                "recursionLevel": "OneLevel",
+                "scopePath": scope_path,
+                "versionDescriptor.version": branch,
+                "versionDescriptor.versionType": "branch",
+            },
+        )
+        entries = []
+        for i in data.get("value", []):
+            path = i.get("path") or ""
+            if path.rstrip("/") == scope_path.rstrip("/"):
+                continue  # ADO echoes the scoped folder itself
+            entries.append(
+                {
+                    "path": path,
+                    "name": path.rsplit("/", 1)[-1],
+                    "isFolder": bool(i.get("isFolder")),
+                    "size": i.get("size"),
+                }
+            )
+        return sorted(entries, key=lambda e: (not e["isFolder"], e["name"].lower()))
+
+    async def get_file(
+        self,
+        project: str,
+        repo_id: str,
+        path: str,
+        version: str | None = None,
+        version_type: str = "branch",
+    ) -> dict[str, Any]:
+        proj, rid = quote(project, safe=""), quote(repo_id, safe="")
+        params: dict[str, Any] = {"path": path, "includeContent": "true", "$format": "json"}
+        if version:
+            params["versionDescriptor.version"] = version
+            params["versionDescriptor.versionType"] = version_type
+        data = await self._get(f"/{proj}/_apis/git/repositories/{rid}/items", params=params)
+        content = data.get("content")
+        return {
+            "path": data.get("path") or path,
+            "objectId": data.get("objectId"),
+            "commitId": data.get("commitId"),
+            "binary": content is None,
+            "truncated": len(content or "") > MAX_FILE_CHARS,
+            "content": (content or "")[:MAX_FILE_CHARS],
+        }
+
+    # -- pull request review ------------------------------------------------------
+
+    async def get_pull_request(self, project: str, repo_id: str, pr_id: int) -> dict[str, Any]:
+        proj, rid = quote(project, safe=""), quote(repo_id, safe="")
+        pr = await self._get(f"/{proj}/_apis/git/repositories/{rid}/pullRequests/{pr_id}")
+        return {
+            "id": pr.get("pullRequestId"),
+            "title": pr.get("title"),
+            "status": pr.get("status"),
+            "sourceRef": (pr.get("sourceRefName") or "").replace("refs/heads/", ""),
+            "targetRef": (pr.get("targetRefName") or "").replace("refs/heads/", ""),
+            "sourceCommit": (pr.get("lastMergeSourceCommit") or {}).get("commitId"),
+            "targetCommit": (pr.get("lastMergeTargetCommit") or {}).get("commitId"),
+        }
+
+    async def pr_files(self, project: str, repo_id: str, pr_id: int) -> dict[str, Any]:
+        """Changed files in the PR's latest iteration, plus the iteration's own
+        source/target commits (kept together so diffs always match this list)."""
+        proj, rid = quote(project, safe=""), quote(repo_id, safe="")
+        base = f"/{proj}/_apis/git/repositories/{rid}/pullRequests/{pr_id}"
+        iterations = (await self._get(f"{base}/iterations")).get("value", [])
+        if not iterations:
+            return {"iteration": None, "sourceCommit": None, "targetCommit": None, "files": []}
+        latest = max(iterations, key=lambda i: i.get("id") or 0)
+        changes = await self._get(f"{base}/iterations/{latest['id']}/changes")
+        files = []
+        for e in changes.get("changeEntries", []):
+            item = e.get("item") or {}
+            if item.get("gitObjectType") == "tree":
+                continue
+            files.append(
+                {
+                    "path": item.get("path") or e.get("originalPath"),
+                    "originalPath": e.get("originalPath"),
+                    "changeType": e.get("changeType"),
+                }
+            )
+        return {
+            "iteration": latest.get("id"),
+            "sourceCommit": (latest.get("sourceRefCommit") or {}).get("commitId"),
+            "targetCommit": (latest.get("targetRefCommit") or {}).get("commitId"),
+            "files": files,
+        }
+
+    async def _file_side(self, project: str, repo_id: str, path: str, commit: str | None) -> dict[str, Any] | None:
+        """One side of a diff, or None when the file doesn't exist there (add/delete)."""
+        if not commit:
+            return None
+        try:
+            return await self.get_file(project, repo_id, path, version=commit, version_type="commit")
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                return None
+            raise
+
+    async def pr_file_diff(self, project: str, repo_id: str, pr_id: int, path: str) -> dict[str, Any]:
+        info = await self.pr_files(project, repo_id, pr_id)
+        entry = next((f for f in info["files"] if f["path"] == path), None)
+        old_path = (entry or {}).get("originalPath") or path
+        old = await self._file_side(project, repo_id, old_path, info["targetCommit"])
+        new = await self._file_side(project, repo_id, path, info["sourceCommit"])
+        meta = {"path": path, "changeType": (entry or {}).get("changeType")}
+        if (old and old["binary"]) or (new and new["binary"]):
+            return {**meta, "binary": True, "diff": "", "addedLines": 0, "removedLines": 0}
+        if (old and old["truncated"]) or (new and new["truncated"]):
+            return {**meta, "binary": False, "tooLarge": True, "diff": "", "addedLines": 0, "removedLines": 0}
+        return {
+            **meta,
+            "binary": False,
+            **unified_diff(old["content"] if old else None, new["content"] if new else None, path),
+        }
+
+    async def list_pr_threads(self, project: str, repo_id: str, pr_id: int) -> list[dict[str, Any]]:
+        """Human comment threads (system events and deleted comments filtered out)."""
+        proj, rid = quote(project, safe=""), quote(repo_id, safe="")
+        data = await self._get(f"/{proj}/_apis/git/repositories/{rid}/pullRequests/{pr_id}/threads")
+        out = []
+        for t in data.get("value", []):
+            if t.get("isDeleted"):
+                continue
+            comments = [
+                {
+                    "id": c.get("id"),
+                    "author": _user(c.get("author")),
+                    "content": c.get("content") or "",
+                    "publishedDate": c.get("publishedDate"),
+                }
+                for c in t.get("comments", [])
+                if c.get("commentType") == "text" and not c.get("isDeleted")
+            ]
+            if not comments:
+                continue
+            ctx = t.get("threadContext") or {}
+            out.append(
+                {
+                    "id": t.get("id"),
+                    "status": t.get("status"),
+                    "filePath": ctx.get("filePath"),
+                    "line": (ctx.get("rightFileStart") or {}).get("line"),
+                    "comments": comments,
+                }
+            )
+        return out
+
     # -- writes ---------------------------------------------------------------
 
     @staticmethod
@@ -386,6 +576,33 @@ class ADOClient:
             f"/{proj}/_apis/git/repositories/{rid}/pullRequests/{pr_id}/reviewers/{reviewer_id}",
             body={"vote": vote},
         )
+
+    async def create_pr_thread(
+        self,
+        project: str,
+        repo_id: str,
+        pr_id: int,
+        comment: str,
+        file_path: str | None = None,
+        line: int | None = None,
+    ) -> dict[str, Any]:
+        """Post a comment thread on a PR — general, or anchored to a file+line
+        (line numbers refer to the right/new side of the diff)."""
+        proj, rid = quote(project, safe=""), quote(repo_id, safe="")
+        body: dict[str, Any] = {
+            "comments": [{"parentCommentId": 0, "content": comment, "commentType": 1}],
+            "status": "active",
+        }
+        if file_path:
+            fp = file_path if file_path.startswith("/") else f"/{file_path}"
+            anchor = {"line": int(line or 1), "offset": 1}
+            body["threadContext"] = {"filePath": fp, "rightFileStart": anchor, "rightFileEnd": anchor}
+        data = await self._send(
+            "POST",
+            f"/{proj}/_apis/git/repositories/{rid}/pullRequests/{pr_id}/threads",
+            body=body,
+        )
+        return {"id": data.get("id"), "status": data.get("status")}
 
     async def set_pr_status(self, project: str, repo_id: str, pr_id: int, status: str) -> dict[str, Any]:
         """status: 'abandoned' or 'active' (reactivate)."""

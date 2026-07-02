@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   addWorkItemComment,
   askCopilot,
+  createPrThread,
   createWorkItem,
   fetchHealth,
   updateWorkItem,
@@ -237,13 +238,22 @@ const FIELD_LABELS: Record<string, string> = {
   tags: "Tags",
   iterationPath: "Iteration",
   text: "Comment",
+  comment: "Comment",
+  prId: "PR",
+  path: "File",
+  line: "Line",
 };
+
+// Args that are plumbing, not content — hidden from the proposal card table.
+const HIDDEN_ARGS = new Set(["repositoryId"]);
 
 function proposalTitle(p: CopilotProposal): string {
   const a = p.args;
   if (p.tool === "create_work_item") return `Create ${a.type ?? "work item"}: ${a.title ?? ""}`;
   if (p.tool === "update_work_item") return `Update work item #${a.id}`;
   if (p.tool === "add_work_item_comment") return `Comment on #${a.id}`;
+  if (p.tool === "comment_on_pr") return `Comment on PR !${a.prId}`;
+  if (p.tool === "comment_on_pr_file") return `Comment on ${a.path}:${a.line} in PR !${a.prId}`;
   return p.tool;
 }
 
@@ -290,18 +300,33 @@ function ProposalCard({
       if (p.tool === "add_work_item_comment") {
         return addWorkItemComment(project, Number(a.id), String(a.text));
       }
+      if (p.tool === "comment_on_pr" || p.tool === "comment_on_pr_file") {
+        return createPrThread(project, String(a.repositoryId), Number(a.prId), {
+          comment: String(a.comment),
+          ...(p.tool === "comment_on_pr_file"
+            ? { filePath: String(a.path), line: Number(a.line) }
+            : {}),
+        });
+      }
       throw new Error(`Unknown proposal type: ${p.tool}`);
     },
     onSuccess: (d: unknown) => {
       onOutcome("applied");
       qc.invalidateQueries({ queryKey: ["workitems", project] });
+      if (p.tool.startsWith("comment_on_pr")) {
+        qc.invalidateQueries({
+          queryKey: ["prthreads", project, String(p.args.repositoryId), Number(p.args.prId)],
+        });
+      }
       const created = d as { id?: number };
       toast(p.tool === "create_work_item" && created?.id ? `#${created.id} created` : "Applied");
     },
     onError: (e) => onOutcome(`failed: ${(e as Error).message}`),
   });
 
-  const rows = Object.entries(p.args).filter(([k]) => k !== "id" || p.tool === "update_work_item");
+  const rows = Object.entries(p.args).filter(
+    ([k]) => !HIDDEN_ARGS.has(k) && (k !== "id" || p.tool === "update_work_item"),
+  );
 
   return (
     <div className="rounded-[8px] border border-accent-border bg-accent-tint p-[12px_14px]">
