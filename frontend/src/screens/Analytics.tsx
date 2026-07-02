@@ -208,6 +208,12 @@ function TurnView({ turn, pending }: { turn: Turn; pending: boolean }) {
   );
 }
 
+/** Genie answers use markdown bold; render **…** as <strong> (no other md expected). */
+function MdBold({ text }: { text: string }) {
+  const parts = text.split("**");
+  return <>{parts.map((p, i) => (i % 2 ? <strong key={i}>{p}</strong> : p))}</>;
+}
+
 function AnswerView({ a }: { a: GenieAnswer }) {
   const [showSql, setShowSql] = useState(false);
   return (
@@ -215,7 +221,7 @@ function AnswerView({ a }: { a: GenieAnswer }) {
       {a.queryDescription && <p className="m-0 text-[13px] text-text">{a.queryDescription}</p>}
       {a.text.map((t, i) => (
         <p key={i} className="m-0 whitespace-pre-wrap text-[13px] text-text">
-          {t}
+          <MdBold text={t} />
         </p>
       ))}
       {a.error && <p className="m-0 text-[12.5px] text-danger">{a.error}</p>}

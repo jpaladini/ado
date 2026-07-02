@@ -86,6 +86,18 @@ def _extract(message: Any, space_id: str) -> dict[str, Any]:
             out["columns"] = [c.name for c in stmt.manifest.schema.columns]
         if stmt and stmt.result and stmt.result.data_array:
             out["rows"] = stmt.result.data_array
+        elif stmt and stmt.statement_id and stmt.manifest:
+            # Genie may return only chunk metadata (no inline data_array); the rows
+            # live at the statement-execution result-chunk endpoint.
+            rows: list[list[Any]] = []
+            for chunk in stmt.manifest.chunks or []:
+                if chunk.chunk_index is None:
+                    continue
+                res = w.statement_execution.get_statement_result_chunk_n(
+                    stmt.statement_id, chunk.chunk_index
+                )
+                rows.extend(res.data_array or [])
+            out["rows"] = rows
 
     if getattr(message, "error", None):
         out["error"] = getattr(message.error, "error", None) or str(message.error)
