@@ -13,6 +13,7 @@ Design notes
 import asyncio
 import logging
 import threading
+import time
 from datetime import datetime, timezone
 from typing import Any
 
@@ -25,6 +26,7 @@ log = logging.getLogger(__name__)
 
 FLUSH_SECS = 3.0
 FLUSH_MAX = 25
+RETRY_SECS = 120.0  # re-probe an unavailable store (grants may have landed since)
 
 
 def _fq() -> str:
@@ -35,6 +37,7 @@ class Store:
     def __init__(self) -> None:
         self._ready: bool | None = None  # None = not yet checked
         self._reason: str | None = None
+        self._checked_at = 0.0
         self._init_lock = threading.Lock()
         self._buffer: list[tuple[str, str, str, str, int, str]] = []
         self._buf_lock = threading.Lock()
@@ -64,6 +67,9 @@ class Store:
         return r
 
     def _ensure(self) -> bool:
+        # Failure is not forever: grants often land after first boot — re-probe.
+        if self._ready is False and time.monotonic() - self._checked_at > RETRY_SECS:
+            self._ready = None
         if self._ready is not None:
             return self._ready
         with self._init_lock:
@@ -83,7 +89,8 @@ class Store:
                 self._ready = True
             except Exception as e:
                 self._ready, self._reason = False, str(e)[:300]
-                log.warning("app-state store unavailable: %s", self._reason)
+                self._checked_at = time.monotonic()
+                log.warning("app-state store unavailable (will retry): %s", self._reason)
         return self._ready
 
     def status(self) -> dict[str, Any]:
