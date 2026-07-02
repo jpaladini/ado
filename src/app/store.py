@@ -98,6 +98,11 @@ class Store:
             return {"available": None, "reason": "not yet used"}
         return {"available": self._ready, "reason": self._reason}
 
+    async def probe(self) -> dict[str, Any]:
+        """Actively verify availability (cached no-op once ready)."""
+        await anyio.to_thread.run_sync(self._ensure)
+        return self.status()
+
     # -- settings ---------------------------------------------------------------
 
     def _get_settings(self, user: str) -> dict[str, str]:

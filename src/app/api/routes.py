@@ -119,7 +119,7 @@ async def commits(project: str, repo_id: str, top: int = Query(25, le=100)) -> d
 @router.get("/whoami")
 async def whoami(request: Request) -> dict[str, object]:
     ident = request_user(request)
-    return {**ident, "store": store.status()}
+    return {**ident, "store": await store.probe()}
 
 
 @router.get("/settings")

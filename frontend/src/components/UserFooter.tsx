@@ -20,7 +20,12 @@ export default function UserFooter({
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
-  const whoami = useQuery({ queryKey: ["whoami"], queryFn: fetchWhoami, staleTime: 300_000 });
+  const whoami = useQuery({ queryKey: ["whoami"], queryFn: fetchWhoami, staleTime: 30_000 });
+
+  // re-check store status whenever the popover opens
+  useEffect(() => {
+    if (open) qc.invalidateQueries({ queryKey: ["whoami"] });
+  }, [open, qc]);
   const settings = useQuery({ queryKey: ["settings"], queryFn: fetchSettings, staleTime: 60_000 });
   const s = settings.data?.settings ?? {};
 
