@@ -5,7 +5,7 @@ import httpx
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
-from app import genie, insights
+from app import copilot, genie, insights
 from app.ado.analytics import AnalyticsClient, OPEN_CATEGORIES
 from app.ado.client import ADOClient, ADOConfigError
 from app.config import settings
@@ -37,6 +37,7 @@ async def health() -> dict[str, object]:
         "status": "ok",
         "ado_configured": settings.ado_configured,
         "genie_configured": genie.genie_available(),
+        "copilot_configured": copilot.copilot_available(),
     }
 
 
@@ -202,6 +203,39 @@ async def genie_ask(body: GenieAsk) -> dict[str, object]:
         raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Genie request failed: {e}")
+
+
+# -- AI copilot (tool-calling agent) --------------------------------------------
+
+
+class CopilotTurn(BaseModel):
+    role: str  # "user" | "assistant"
+    content: str
+
+
+class CopilotBody(BaseModel):
+    project: str
+    message: str
+    history: list[CopilotTurn] = []
+
+
+@router.post("/copilot/chat")
+async def copilot_chat(body: CopilotBody) -> dict[str, object]:
+    msg = body.message.strip()
+    if not msg:
+        raise HTTPException(status_code=422, detail="Message is empty")
+    try:
+        return await copilot.chat(
+            body.project, msg, [t.model_dump() for t in body.history[-20:]]
+        )
+    except copilot.CopilotNotConfigured as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(
+            status_code=502, detail=f"Model endpoint returned {e.response.status_code}"
+        )
+    except httpx.HTTPError:
+        raise HTTPException(status_code=502, detail="Could not reach the model endpoint")
 
 
 # -- writes -------------------------------------------------------------------

@@ -134,11 +134,21 @@ through the trunk (GitHub → mirror → ADO PR → pipeline).
 - Backend: extend the analytics client with parameterized filters (AssignedTo/UserName,
   WorkItemType, DateValue/CreatedDate windows).
 
-**4D — AI tab (dedicated) with session history.**
-- New "AI" tab under Insights: the Genie conversation UI moves here.
-- Sessions persist per user in the app-state store (question/answer turns +
-  conversation_id); a left rail lists previous sessions; resuming continues the same
-  Genie conversation where the API allows, else replays context.
+**4D — AI Copilot (re-scoped 2026-07-02; v1 shipped).** Not a Genie chat relocation —
+a **tool-calling agent** over an FMAPI serving endpoint (name is config) acting on the
+live operational plane:
+- Read tools execute immediately (work items, PRs, builds, identities, analytics
+  summary) through the same ADO client as the REST routes.
+- Write tools are **propose-then-apply**: the agent's create/update/comment calls come
+  back as proposal cards; Apply executes through the normal REST routes (identical
+  audit + permissions). Auto-apply may later become a per-user setting.
+- **MLflow Tracing** records every turn (question → model calls → tool runs →
+  proposals) to a workspace experiment. Runbook + design contract: AGENTS.md
+  "AI Copilot activation".
+- Later cuts: per-user session history in the app-state store; PR-review tools (needs
+  4F's file/diff endpoints); artifact generation (PDF/Excel downloads); gated
+  table-edit tools. Genie stays on the Analytics tab for historical questions and may
+  later become one copilot tool among many.
 
 **4E — Report builder.**
 - Visual query builder over the OData analytics surface: entity (work items /

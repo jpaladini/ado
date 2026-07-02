@@ -23,10 +23,11 @@ import PullRequests from "../screens/PullRequests";
 import Pipelines from "../screens/Pipelines";
 import Code from "../screens/Code";
 import Analytics from "../screens/Analytics";
+import Copilot from "../screens/Copilot";
 import UserFooter from "./UserFooter";
 
 const TABS = ["Overview", "Work Items", "Pull Requests", "Pipelines", "Code"] as const;
-type Tab = (typeof TABS)[number] | "Analytics";
+type Tab = (typeof TABS)[number] | "Analytics" | "AI";
 
 const ICONS: Record<(typeof TABS)[number], (p: { size?: number }) => JSX.Element> = {
   Overview: IconOverview,
@@ -104,6 +105,20 @@ export default function Shell({
             Insights
           </div>
           <button
+            onClick={() => setTab("AI")}
+            className={`relative flex items-center gap-[10px] rounded-[8px] px-[11px] py-[8px] text-[13px] ${
+              tab === "AI"
+                ? "bg-accent-tint font-semibold text-accent-text"
+                : "font-medium text-text-2 hover:bg-hover"
+            }`}
+          >
+            {tab === "AI" && (
+              <span className="absolute bottom-[8px] left-0 top-[8px] w-[3px] rounded-[2px] bg-accent" />
+            )}
+            <Spark size={16} />
+            AI Copilot
+          </button>
+          <button
             onClick={() => setTab("Analytics")}
             className={`relative flex items-center gap-[10px] rounded-[8px] px-[11px] py-[8px] text-[13px] ${
               tab === "Analytics"
@@ -160,6 +175,7 @@ export default function Shell({
           {tab === "Pipelines" && <Pipelines project={project.name} />}
           {tab === "Code" && <Code project={project.name} />}
           {tab === "Analytics" && <Analytics />}
+          {tab === "AI" && <Copilot project={project.name} />}
         </div>
       </div>
     </div>

@@ -48,6 +48,8 @@ Pipeline → `databricks bundle deploy` → live app.**
 | Ingest job | `ado-analytics-ingest` (dev name prefixed), job id `107551918974938`, daily 05:00 UTC UNPAUSED |
 | Genie Space | `ADO Companion Analytics`, space id `01f175a49a6f18758e5c5007a99296eb` |
 | Analytics tables | `workspace.ado_analytics.work_items`, `workspace.ado_analytics.work_item_daily` |
+| Copilot endpoint (dev) | `databricks-llama-4-maverick` (Claude endpoints are rate-limited to 0 on Free Edition) |
+| MLflow experiment | `/Shared/ado-companion-copilot`, id `3567576457281688` (copilot turn traces) |
 | App-state store | `workspace.ado_companion_app` (`settings`, `audit_log`) — schema + grants exist |
 | ADO org / project / repo | `jpaladini85` / `home` / `ado` |
 | ADO deploy branch | `dev` (protected; **only Jason merges PRs into it** — agent merge is classifier-blocked by design) |
@@ -109,16 +111,22 @@ API reads, Genie space creation) is allowed.
 says activity log **on** and a state change lands a row in
 `workspace.ado_companion_app.audit_log`.
 
-**In flight:**
-- **Phase 4B — Work items full CRUD** (PR #9, branch `claude/resume-next-session-pbbmrk`):
-  "+ New item" drawer (type/title/description/assignee search/tags/iteration), row-click
-  edit drawer (title/description/assignee/state/tags/iteration + comment history + add
-  comment), tags column in the table. Backend: create_work_item, get_work_item,
-  list_work_item_comments, search_identities (IdentityPicker — needs Min+MaxResults),
-  list_work_item_types (hidden category filtered), list_iterations; BFF routes for all;
-  audit actions workitem.create/update. All verified against live ADO + 24 pytest cases.
+- **PR #9 (Phase 4B — work items full CRUD)** and **PR #10 (Genie empty-table fix:
+  rows now fetched from statement result chunks)** — both merged & deployed 2026-07-02.
 
-**Next up (the agreed order): 4C → 4D → 4E → 4F** (full detail in PLAN.md §5a):
+**In flight:**
+- **Phase 4D — AI Copilot v1** (PR #11, branch `claude/resume-next-session-pbbmrk`):
+  tool-calling agent over FMAPI (`/api/copilot/chat`, `src/app/copilot.py`), AI tab UI
+  with read-tool chips + propose-then-apply cards, MLflow turn tracing. Re-scoped from
+  "Genie chat tab" after Jason's direction: the AI must *act* (create/edit/clean up
+  items, later PR review + artifacts), not just answer. Full runbook + design contract
+  in AGENTS.md "AI Copilot activation" (written so Databricks Genie Code can implement/
+  activate it in an enterprise workspace unaided). After merge, Jason sets secrets
+  `ado/copilot_endpoint` (= databricks-llama-4-maverick) + `ado/mlflow_experiment_id`
+  (= 3567576457281688) and grants the app SP CAN_EDIT on the experiment + confirms
+  endpoint query access (C1–C3 in AGENTS.md).
+
+**Next up: 4C → 4E → 4F** (full detail in PLAN.md §5a):
 - **4C — Reports** *(START HERE next)*: Analytics tab → report widgets w/ assignee/type/date filters (OData).
 - **4D — AI tab**: move Genie chat to dedicated tab + per-user session history (store).
 - **4E — Report builder**: visual OData query builder + saved reports (store).
@@ -141,6 +149,8 @@ src/app/api/routes.py      all /api endpoints (BFF)
 src/app/ado/client.py      operational plane: live ADO REST (httpx, PAT basic auth)
 src/app/ado/analytics.py   analytical plane: ADO Analytics OData ($apply, snapshots)
 src/app/genie.py           Genie Conversation API client (space id from secret at runtime)
+src/app/copilot.py         AI copilot: FMAPI tool-calling agent loop, propose-then-apply,
+                           MLflow turn tracing (endpoint/experiment from secrets at runtime)
 src/app/insights.py        table freshness (DESCRIBE DETAIL) + ingest run-now
 src/app/store.py           Delta app-state store (settings, audit) — parameterized SQL,
                            batched audit writes, graceful degradation, 120s re-probe

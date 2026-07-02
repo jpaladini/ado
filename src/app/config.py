@@ -12,6 +12,12 @@ class Settings(BaseSettings):
     # Genie Space ID for NL analytics. Optional env override; when unset, the app
     # tries the ado/genie_space_id secret at runtime (see app/genie.py).
     genie_space_id: str = ""
+    # FMAPI serving endpoint for the AI copilot (tool-calling chat). Optional env
+    # override; when unset, the app tries the ado/copilot_endpoint secret.
+    copilot_endpoint: str = ""
+    # MLflow experiment for copilot turn tracing. Optional env override; when
+    # unset, the app tries the ado/mlflow_experiment_id secret. Empty = no tracing.
+    mlflow_experiment_id: str = ""
     # Where the ingest job lands the analytics Delta tables.
     analytics_catalog: str = "workspace"
     analytics_schema: str = "ado_analytics"

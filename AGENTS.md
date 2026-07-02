@@ -22,6 +22,8 @@ All per-environment config is secrets — the code is identical across dev/stg/p
 | `ado_pat` | Azure DevOps PAT — Work Items R/W, Code R/W, Build R+Execute | app (runtime env via bundle resource) |
 | `ado_project` | ADO project name (e.g. `home`) | ingest job (fallback when `--project` is empty) — **required before the daily schedule runs** |
 | `genie_space_id` | Genie Space ID (32-hex) | app, looked up at runtime — no redeploy needed |
+| `copilot_endpoint` | FMAPI chat endpoint name for the AI copilot (e.g. `databricks-llama-4-maverick`; enterprise: `databricks-claude-sonnet-5`) | app, runtime — no redeploy |
+| `mlflow_experiment_id` | MLflow experiment id for copilot turn tracing (optional) | app, runtime — no redeploy |
 
 The app's service principal holds scope-level READ (granted by the bundle's secret
 resources). Creating/updating secret *values* is typically a **HUMAN** step (agents are
@@ -211,6 +213,90 @@ user popover). Identity comes from the `X-Forwarded-Email` /
 `X-Forwarded-Preferred-Username` headers Databricks Apps injects; `/api/whoami.source`
 shows which header matched (`none` means the platform isn't forwarding identity —
 check the app's user authorization settings).
+
+## AI Copilot activation (Phase 4D — tool-calling agent + MLflow tracing)
+
+The AI tab is a **tool-calling agent** over a Databricks FMAPI serving endpoint. It is
+not Genie: it acts on the *operational* plane (live ADO REST) through the same client
+the REST routes use. Genie remains the batch/historical analytics surface.
+
+### Design contract (implement/modify against these invariants)
+- **Propose-then-apply.** Read tools execute immediately inside the agent loop. Write
+  tools (`create_work_item`, `update_work_item`, `add_work_item_comment`) are NEVER
+  executed server-side by the loop — each call is returned to the UI as a *proposal*
+  `{id, tool, args}`; the UI's Apply button calls the ordinary REST route, so audit
+  logging, permissions, and code paths are byte-identical to a human click. Keep this
+  invariant when adding tools: new write capabilities = new proposal types + an Apply
+  mapping in the UI, never direct execution in the loop.
+- **Wire protocol** is OpenAI-style chat completions with `tools`, POSTed to
+  `{workspace}/serving-endpoints/{name}/invocations`. Auth: `WorkspaceClient().config
+  .authenticate()` gives refreshed bearer headers for both SP (in-app) and PAT (dev).
+- **Reasoning models** (e.g. gpt-oss) return `content` as a list of typed blocks, not a
+  string — extract only `{"type": "text"}` blocks (`_content_text` in copilot.py).
+- **Loop bounds**: MAX_TURNS=8 model calls per user message; tool results truncated to
+  6000 chars before being fed back.
+- **Endpoint + experiment are per-workspace config** read at runtime (no redeploy):
+  env `COPILOT_ENDPOINT` / secret `ado/copilot_endpoint`; env `MLFLOW_EXPERIMENT_ID` /
+  secret `ado/mlflow_experiment_id`.
+- **MLflow tracing is optional and never fatal**: every turn logs a `copilot.turn` span
+  with child `llm` spans (per model call: message count, finish_reason, token usage) and
+  `tool:{name}` spans (args in, truncated result out). Any tracing failure downgrades to
+  no-op — a chat turn must never break because tracing is misconfigured.
+- Where things live: `src/app/copilot.py` (loop, tool registry, tracing),
+  `/api/copilot/chat` in `src/app/api/routes.py`, audit action `copilot.chat` in
+  `src/app/main.py`, UI `frontend/src/screens/Copilot.tsx` (proposal cards + Apply).
+
+### C0. Choose the serving endpoint
+List candidates: `GET /api/2.0/serving-endpoints` — you want `task: llm/v1/chat` and
+tool-calling support. Verified working choices:
+- **Free Edition**: `databricks-llama-4-maverick` (default) or
+  `databricks-meta-llama-3-3-70b-instruct`. The Claude endpoints
+  (`databricks-claude-sonnet-5`, `databricks-claude-opus-4-8`) are visible but
+  **Databricks-rate-limited to 0** on Free Edition — calls fail with
+  `PERMISSION_DENIED: temporarily disabled due to a Databricks-set rate limit of 0`.
+- **Enterprise**: prefer `databricks-claude-sonnet-5` (strongest tool use); any
+  chat endpoint with function calling works. Smoke-test tool calling first:
+  POST one message + one tool schema to `/serving-endpoints/<name>/invocations` and
+  confirm the response's `finish_reason` is `tool_calls`.
+
+### C1. HUMAN — set the endpoint secret
+```python
+WorkspaceClient().secrets.put_secret("ado", "copilot_endpoint", string_value="<endpoint-name>")
+```
+The app reads it at runtime — no redeploy. `GET /api/health` → `"copilot_configured": true`.
+
+### C2. Create the MLflow experiment (agent-allowed) + HUMAN grant
+```bash
+curl -X POST "$DBX/api/2.0/mlflow/experiments/create" -H "Authorization: Bearer $TOKEN" \
+  -d '{"name": "/Shared/ado-companion-copilot"}'        # returns experiment_id
+```
+Then (HUMAN) set the secret and grant the **app SP** permission to log traces:
+```python
+w = WorkspaceClient()
+w.secrets.put_secret("ado", "mlflow_experiment_id", string_value="<experiment_id>")
+w.api_client.do("PATCH", "/api/2.0/permissions/experiments/<experiment_id>",
+  body={"access_control_list": [{"service_principal_name": "<app-sp-client-id>",
+                                 "permission_level": "CAN_EDIT"}]})
+```
+Tracing is optional: skip C2 entirely and the copilot still works, just untraced.
+
+### C3. HUMAN — endpoint access for the app SP (enterprise)
+On Free Edition pay-per-token endpoints are workspace-queryable by default. In
+enterprise workspaces confirm the app's service principal has **Can Query** on the
+chosen serving endpoint (Serving → endpoint → Permissions).
+
+### C4. Verify
+- `GET <app-url>/api/health` → `"copilot_configured": true`
+- AI tab → "What's open right now?" → answer with `read:` tool chips.
+- Ask it to create/update something → a proposal card appears; **Apply** executes and
+  the row lands in `workspace.ado_companion_app.audit_log` (action `workitem.*`), plus
+  a `copilot.chat` row for the conversation turn itself.
+- Experiment `/Shared/ado-companion-copilot` → Traces tab shows a `copilot.turn` trace
+  per question with nested `llm` / `tool:*` spans.
+
+Failure modes: `copilot_configured: false` → C1 missing; 502 "Model endpoint returned
+403/404" → C3 missing or endpoint name wrong; traces absent but chat works → C2
+missing/ungranted (by design, non-fatal).
 
 ## Operational rules (learned in production bring-up — do not relearn these)
 

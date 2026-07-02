@@ -1,0 +1,279 @@
+import { useRef, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  addWorkItemComment,
+  askCopilot,
+  createWorkItem,
+  fetchHealth,
+  updateWorkItem,
+  type CopilotProposal,
+  type CopilotReply,
+  type WorkItemCreatePayload,
+  type WorkItemUpdatePayload,
+} from "../api";
+import { Card, H1 } from "../components/ui";
+import { Spark } from "../components/icons";
+import { textToHtml } from "../lib/text";
+import { useToast } from "../components/Toast";
+
+interface Turn {
+  question: string;
+  answer?: CopilotReply;
+  error?: string;
+}
+
+const SUGGESTIONS = [
+  "What's open right now, and who's overloaded?",
+  "Create a task to tighten up the release checklist, assign it to me",
+  "Read work item 2 and improve its description",
+  "Any PRs waiting on review?",
+];
+
+export default function Copilot({ project }: { project: string }) {
+  const health = useQuery({ queryKey: ["health"], queryFn: fetchHealth });
+  const [turns, setTurns] = useState<Turn[]>([]);
+  const [question, setQuestion] = useState("");
+  const endRef = useRef<HTMLDivElement>(null);
+
+  const mut = useMutation({
+    mutationFn: (q: string) => {
+      const history = turns.flatMap((t) =>
+        t.answer
+          ? [
+              { role: "user" as const, content: t.question },
+              { role: "assistant" as const, content: t.answer.reply },
+            ]
+          : [],
+      );
+      return askCopilot(project, q, history);
+    },
+    onSuccess: (a) => setTurns((t) => [...t.slice(0, -1), { ...t[t.length - 1], answer: a }]),
+    onError: (e) =>
+      setTurns((t) => [...t.slice(0, -1), { ...t[t.length - 1], error: (e as Error).message }]),
+    onSettled: () => setTimeout(() => endRef.current?.scrollIntoView({ behavior: "smooth" }), 50),
+  });
+
+  const ask = (q?: string) => {
+    const text = (q ?? question).trim();
+    if (!text || mut.isPending) return;
+    setTurns((t) => [...t, { question: text }]);
+    setQuestion("");
+    mut.mutate(text);
+  };
+
+  if (health.data && !health.data.copilot_configured) return <NotConfigured />;
+
+  return (
+    <div className="mx-auto max-w-[860px]">
+      <H1>AI Copilot</H1>
+      <p className="m-0 mt-[5px] text-[12.5px] text-muted">
+        An agent over your live Azure DevOps data. It reads freely; every change it wants to make
+        comes back as a proposal you apply.
+      </p>
+
+      {turns.length === 0 && (
+        <div className="mt-6 grid grid-cols-2 gap-2">
+          {SUGGESTIONS.map((s) => (
+            <button
+              key={s}
+              onClick={() => ask(s)}
+              className="rounded-[7px] border border-border bg-surface px-[13px] py-[9px] text-left text-[12px] text-text-3 hover:border-faint"
+            >
+              {s}
+            </button>
+          ))}
+        </div>
+      )}
+
+      <div className="mt-5 space-y-5">
+        {turns.map((t, i) => (
+          <TurnView key={i} turn={t} project={project} pending={mut.isPending && i === turns.length - 1} />
+        ))}
+        <div ref={endRef} />
+      </div>
+
+      <div className="sticky bottom-0 mt-5 flex items-center gap-[10px] rounded-[10px] border border-border bg-surface p-[10px_12px]">
+        <span className="text-accent">
+          <Spark size={15} />
+        </span>
+        <input
+          value={question}
+          onChange={(e) => setQuestion(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && ask()}
+          placeholder="Ask, or tell it what to change…"
+          disabled={mut.isPending}
+          className="w-full border-none bg-transparent text-[13px] text-text outline-none placeholder:text-faint disabled:opacity-60"
+        />
+        <button
+          onClick={() => ask()}
+          disabled={mut.isPending || !question.trim()}
+          className="rounded-[7px] bg-accent px-[16px] py-[8px] text-[12px] font-semibold text-white hover:bg-accent-hover disabled:opacity-50"
+        >
+          Send
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function NotConfigured() {
+  return (
+    <div className="mx-auto max-w-[860px]">
+      <H1>AI Copilot</H1>
+      <Card className="mt-5 p-6">
+        <div className="text-[13px] font-semibold text-text">The copilot isn’t set up yet</div>
+        <p className="mt-1 text-[12.5px] text-muted">
+          Set the <code className="font-mono">ado/copilot_endpoint</code> secret to a Databricks
+          FMAPI chat endpoint name (e.g. <code className="font-mono">databricks-llama-4-maverick</code>),
+          and optionally <code className="font-mono">ado/mlflow_experiment_id</code> for tracing.
+          See AGENTS.md — no redeploy needed.
+        </p>
+      </Card>
+    </div>
+  );
+}
+
+function TurnView({ turn, project, pending }: { turn: Turn; project: string; pending: boolean }) {
+  return (
+    <div>
+      <div className="flex justify-end">
+        <span className="max-w-[80%] rounded-[10px] bg-ink-bg px-[14px] py-[8px] text-[13px] text-ink-fg">
+          {turn.question}
+        </span>
+      </div>
+      <div className="mt-3">
+        {pending && <p className="m-0 animate-pulse text-[12.5px] text-faint">Working — reading your project…</p>}
+        {turn.error && <p className="m-0 text-[12.5px] text-danger">{turn.error}</p>}
+        {turn.answer && <AnswerView a={turn.answer} project={project} />}
+      </div>
+    </div>
+  );
+}
+
+function AnswerView({ a, project }: { a: CopilotReply; project: string }) {
+  return (
+    <Card className="space-y-3 p-[14px_16px]">
+      {a.toolCalls.length > 0 && (
+        <div className="flex flex-wrap gap-[5px]">
+          {a.toolCalls.map((t, i) => (
+            <span key={i} className="rounded-[5px] bg-nbg px-[7px] py-[2px] font-mono text-[10.5px] text-nfg" title={JSON.stringify(t.args)}>
+              read: {t.name}
+            </span>
+          ))}
+        </div>
+      )}
+      <p className="m-0 whitespace-pre-wrap text-[13px] text-text">{a.reply}</p>
+      {a.proposals.map((p) => (
+        <ProposalCard key={p.id} p={p} project={project} />
+      ))}
+    </Card>
+  );
+}
+
+const FIELD_LABELS: Record<string, string> = {
+  type: "Type",
+  title: "Title",
+  description: "Description",
+  assignedTo: "Assignee",
+  state: "State",
+  tags: "Tags",
+  iterationPath: "Iteration",
+  text: "Comment",
+};
+
+function proposalTitle(p: CopilotProposal): string {
+  const a = p.args;
+  if (p.tool === "create_work_item") return `Create ${a.type ?? "work item"}: ${a.title ?? ""}`;
+  if (p.tool === "update_work_item") return `Update work item #${a.id}`;
+  if (p.tool === "add_work_item_comment") return `Comment on #${a.id}`;
+  return p.tool;
+}
+
+type ProposalStatus = "pending" | "applied" | "dismissed";
+
+function ProposalCard({ p, project }: { p: CopilotProposal; project: string }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [status, setStatus] = useState<ProposalStatus>("pending");
+
+  const apply = useMutation({
+    mutationFn: async () => {
+      const a = p.args as Record<string, string | number | undefined>;
+      if (p.tool === "create_work_item") {
+        const body: WorkItemCreatePayload = {
+          type: String(a.type),
+          title: String(a.title),
+          ...(a.description ? { description: textToHtml(String(a.description)) } : {}),
+          ...(a.assignedTo ? { assignedTo: String(a.assignedTo) } : {}),
+          ...(a.tags ? { tags: String(a.tags) } : {}),
+          ...(a.iterationPath ? { iterationPath: String(a.iterationPath) } : {}),
+        };
+        return createWorkItem(project, body);
+      }
+      if (p.tool === "update_work_item") {
+        const body: WorkItemUpdatePayload = {};
+        if (a.title !== undefined) body.title = String(a.title);
+        if (a.description !== undefined) body.description = textToHtml(String(a.description));
+        if (a.assignedTo !== undefined) body.assignedTo = String(a.assignedTo);
+        if (a.state !== undefined) body.state = String(a.state);
+        if (a.tags !== undefined) body.tags = String(a.tags);
+        if (a.iterationPath !== undefined) body.iterationPath = String(a.iterationPath);
+        return updateWorkItem(project, Number(a.id), body);
+      }
+      if (p.tool === "add_work_item_comment") {
+        return addWorkItemComment(project, Number(a.id), String(a.text));
+      }
+      throw new Error(`Unknown proposal type: ${p.tool}`);
+    },
+    onSuccess: (d: unknown) => {
+      setStatus("applied");
+      qc.invalidateQueries({ queryKey: ["workitems", project] });
+      const created = d as { id?: number };
+      toast(p.tool === "create_work_item" && created?.id ? `#${created.id} created` : "Applied");
+    },
+  });
+
+  const rows = Object.entries(p.args).filter(([k]) => k !== "id" || p.tool === "update_work_item");
+
+  return (
+    <div className="rounded-[8px] border border-accent-border bg-accent-tint p-[12px_14px]">
+      <div className="mb-2 flex items-center justify-between">
+        <span className="text-[12.5px] font-semibold text-accent-text">{proposalTitle(p)}</span>
+        {status === "applied" && (
+          <span className="rounded-[20px] bg-ok-bg px-[9px] py-[2px] text-[11px] font-semibold text-ok">applied</span>
+        )}
+        {status === "dismissed" && (
+          <span className="rounded-[20px] bg-nbg px-[9px] py-[2px] text-[11px] font-semibold text-nfg">dismissed</span>
+        )}
+      </div>
+      <table className="w-full text-[12px]">
+        <tbody>
+          {rows.map(([k, v]) => (
+            <tr key={k}>
+              <td className="w-[92px] py-[2px] pr-2 align-top font-semibold text-text-3">{FIELD_LABELS[k] ?? k}</td>
+              <td className="whitespace-pre-wrap py-[2px] text-text-2">{String(v)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {apply.isError && <div className="mt-2 text-[11.5px] text-danger">{(apply.error as Error).message}</div>}
+      {status === "pending" && (
+        <div className="mt-[10px] flex gap-[8px]">
+          <button
+            onClick={() => apply.mutate()}
+            disabled={apply.isPending}
+            className="rounded-[7px] bg-accent px-[14px] py-[6px] text-[12px] font-semibold text-white hover:bg-accent-hover disabled:opacity-50"
+          >
+            {apply.isPending ? "Applying…" : "Apply"}
+          </button>
+          <button
+            onClick={() => setStatus("dismissed")}
+            className="rounded-[7px] border border-border bg-surface px-[12px] py-[6px] text-[12px] font-medium text-text-3 hover:bg-hover"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}

@@ -10,6 +10,25 @@ export interface Health {
   status: string;
   ado_configured: boolean;
   genie_configured?: boolean;
+  copilot_configured?: boolean;
+}
+
+export interface CopilotToolCall {
+  name: string;
+  args: Record<string, unknown>;
+}
+
+export interface CopilotProposal {
+  id: string;
+  tool: string; // create_work_item | update_work_item | add_work_item_comment
+  args: Record<string, unknown>;
+}
+
+export interface CopilotReply {
+  reply: string;
+  toolCalls: CopilotToolCall[];
+  proposals: CopilotProposal[];
+  endpoint: string;
 }
 
 export interface GenieAnswer {
@@ -179,6 +198,11 @@ export const putSetting = (key: string, value: string) =>
 export const fetchHealth = () => get<Health>("/api/health");
 export const askGenie = (question: string, conversationId?: string) =>
   send<GenieAnswer>("/api/genie/ask", "POST", { question, conversationId });
+export const askCopilot = (
+  project: string,
+  message: string,
+  history: { role: "user" | "assistant"; content: string }[],
+) => send<CopilotReply>("/api/copilot/chat", "POST", { project, message, history });
 export const fetchFreshness = () => get<Freshness>("/api/analytics/freshness");
 export const refreshAnalyticsData = () =>
   send<{ started: boolean; runId?: number; reason?: string }>("/api/analytics/refresh", "POST");

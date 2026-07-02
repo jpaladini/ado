@@ -18,29 +18,12 @@ import {
 import { Card, Empty, ErrorMsg, H1, Loading, relTime } from "../components/ui";
 import { IconChevron, IconSearch, IconX } from "../components/icons";
 import { stateChip, tagChip, typeDot } from "../lib/tokens";
+import { htmlToText, textToHtml } from "../lib/text";
 import { useToast } from "../components/Toast";
 
 const STATES = ["New", "To Do", "Active", "Doing", "Resolved", "Done", "Closed", "Removed"];
 const isActive = (s: string) => ["active", "doing"].includes((s ?? "").toLowerCase());
 const isNew = (s: string) => ["new", "to do"].includes((s ?? "").toLowerCase());
-
-// ADO stores description/comments as HTML; we edit and render them as plain text.
-function htmlToText(html: string): string {
-  if (!html) return "";
-  const withBreaks = html.replace(/<br\s*\/?>/gi, "\n").replace(/<\/(p|div|li)>/gi, "\n");
-  const el = document.createElement("div");
-  el.innerHTML = withBreaks;
-  return (el.textContent ?? "").replace(/\n{3,}/g, "\n\n").trim();
-}
-
-function textToHtml(text: string): string {
-  return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .split("\n")
-    .join("<br>");
-}
 
 type Filter = "All" | "Active" | "New" | "Mine";
 const FILTERS: Filter[] = ["All", "Active", "New", "Mine"];
