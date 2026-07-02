@@ -105,6 +105,7 @@ const enc = encodeURIComponent;
 export interface Freshness {
   available: boolean;
   asOf?: string;
+  updatedAt?: string | null;
   reason?: string;
 }
 

@@ -37,10 +37,27 @@ def _freshness_sync() -> dict[str, Any]:
             warehouse_id=warehouse.id,
             wait_timeout="30s",
         )
-        if r.status and r.status.state == StatementState.SUCCEEDED and r.result and r.result.data_array:
-            return {"available": True, "asOf": r.result.data_array[0][0]}
-        detail = (r.status.error.message if r.status and r.status.error else None) or "query did not succeed"
-        return {"available": False, "reason": detail[:200]}
+        if not (r.status and r.status.state == StatementState.SUCCEEDED and r.result and r.result.data_array):
+            detail = (r.status.error.message if r.status and r.status.error else None) or "query did not succeed"
+            return {"available": False, "reason": detail[:200]}
+        as_of = r.result.data_array[0][0]
+
+        # Exact last-write time of the Delta table — lets the UI prove a refresh landed.
+        updated_at = None
+        try:
+            d = w.statement_execution.execute_statement(
+                statement=f"DESCRIBE DETAIL {_fq()}.work_item_daily",
+                warehouse_id=warehouse.id,
+                wait_timeout="30s",
+            )
+            if d.status and d.status.state == StatementState.SUCCEEDED and d.result and d.result.data_array:
+                cols = [c.name for c in d.manifest.schema.columns] if d.manifest and d.manifest.schema else []
+                if "lastModified" in cols:
+                    updated_at = d.result.data_array[0][cols.index("lastModified")]
+        except Exception as e:  # freshness date still useful without the timestamp
+            log.info("describe detail failed: %s", e)
+
+        return {"available": True, "asOf": as_of, "updatedAt": updated_at}
     except Exception as e:
         log.info("freshness check failed: %s", e)
         return {"available": False, "reason": str(e)[:200]}
