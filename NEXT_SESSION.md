@@ -135,8 +135,11 @@ says activity log **on** and a state change lands a row in
 **Also pending / notable:**
 - Model for the future FMAPI copilot (Phase 5): Jason leaning `databricks-claude-sonnet-5`
   (Databricks-served) vs `llama-4-maverick`; endpoint name will be config.
-- Blog drafts live in `docs/blog/` (Parts 1 & 2 + screenshots); Part 3 ("teaching the app
-  to talk to its own data") is a candidate.
+- Blog drafts live in `docs/blog/` — Parts 1 & 2 (build + OData), **Part 3 (the AI
+  copilot: decisions, propose-then-apply, Genie-as-tool) and Part 4 (MLflow tracing:
+  span design, the two day-one diagnoses) drafted 2026-07-02**. All `draft: true`;
+  screenshot slots marked inline. Jason's site is Astro + Tailwind, minimalist B&W
+  (github.com/jpaladini/jpaladini → jpaladini.vercel.app), no blog section yet.
 - Open-sourcing is a stated goal: keep `AGENTS.md` self-sufficient and vendor-neutral;
   never commit tokens; rotate the PATs before going public (they appeared in a session
   transcript).
