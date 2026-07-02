@@ -198,6 +198,23 @@ export const putSetting = (key: string, value: string) =>
 export const fetchHealth = () => get<Health>("/api/health");
 export const askGenie = (question: string, conversationId?: string) =>
   send<GenieAnswer>("/api/genie/ask", "POST", { question, conversationId });
+export interface WorkItemSuggestion {
+  title?: string;
+  description?: string;
+  tags?: string;
+  type?: string;
+  acceptanceCriteria?: string;
+}
+
+export const suggestWorkItem = (body: {
+  project: string;
+  type?: string;
+  title?: string;
+  description?: string;
+}) =>
+  send<{ suggestion: WorkItemSuggestion; endpoint: string }>(
+    "/api/ai/suggest-workitem", "POST", body);
+
 export const askCopilot = (
   project: string,
   message: string,

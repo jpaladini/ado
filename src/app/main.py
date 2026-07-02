@@ -22,6 +22,7 @@ _ACTIONS = [
     (re.compile(r"/pullrequests/\d+$"), "PATCH", "pr.status"),
     (re.compile(r"^/api/genie/ask$"), "POST", "genie.ask"),
     (re.compile(r"^/api/copilot/chat$"), "POST", "copilot.chat"),
+    (re.compile(r"^/api/ai/suggest-workitem$"), "POST", "ai.suggest"),
     (re.compile(r"^/api/analytics/refresh$"), "POST", "analytics.refresh"),
     (re.compile(r"^/api/settings$"), "PUT", "settings.update"),
 ]

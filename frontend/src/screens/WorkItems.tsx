@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   addWorkItemComment,
   createWorkItem,
+  fetchHealth,
   fetchIterations,
   fetchWorkItemComments,
   fetchWorkItemDetail,
@@ -10,13 +11,15 @@ import {
   fetchWorkItemTypes,
   searchIdentities,
   setWorkItemState,
+  suggestWorkItem,
   updateWorkItem,
   type Identity,
   type WorkItem,
+  type WorkItemSuggestion,
   type WorkItemUpdatePayload,
 } from "../api";
 import { Card, Empty, ErrorMsg, H1, Loading, relTime } from "../components/ui";
-import { IconChevron, IconSearch, IconX } from "../components/icons";
+import { IconChevron, IconSearch, IconX, Spark } from "../components/icons";
 import { stateChip, tagChip, typeDot } from "../lib/tokens";
 import { htmlToText, textToHtml } from "../lib/text";
 import { useToast } from "../components/Toast";
@@ -220,10 +223,21 @@ function Drawer({ title, onClose, children }: { title: React.ReactNode; onClose:
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({
+  label,
+  action,
+  children,
+}: {
+  label: string;
+  action?: React.ReactNode;
+  children: React.ReactNode;
+}) {
   return (
     <label className="mb-[14px] block">
-      <div className="mb-[5px] text-[10.5px] font-semibold uppercase tracking-[0.5px] text-faint">{label}</div>
+      <div className="mb-[5px] flex items-center justify-between">
+        <span className="text-[10.5px] font-semibold uppercase tracking-[0.5px] text-faint">{label}</span>
+        {action}
+      </div>
       {children}
     </label>
   );
@@ -247,6 +261,48 @@ function Select({ value, onChange, options }: { value: string; onChange: (v: str
       </span>
     </span>
   );
+}
+
+// ---- AI suggestion button ---------------------------------------------------------
+
+/** Renders next to a Field label; only shown when the copilot endpoint is configured. */
+function AIButton({
+  label,
+  busy,
+  disabled,
+  onClick,
+}: {
+  label: string;
+  busy: boolean;
+  disabled?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={busy || disabled}
+      className={`inline-flex items-center gap-[5px] rounded-[6px] border border-border bg-surface px-[8px] py-[3px] text-[11px] font-semibold text-text-3 hover:border-faint hover:text-accent-text disabled:opacity-50 ${busy ? "animate-pulse" : ""}`}
+    >
+      <span className="text-accent">
+        <Spark size={11} />
+      </span>
+      {busy ? "Thinking…" : label}
+    </button>
+  );
+}
+
+function useCopilotConfigured(): boolean {
+  const health = useQuery({ queryKey: ["health"], queryFn: fetchHealth, staleTime: 60_000 });
+  return health.data?.copilot_configured === true;
+}
+
+/** Merge a suggestion's description + acceptance criteria into one textarea value. */
+function suggestionText(s: WorkItemSuggestion): string | null {
+  if (!s.description) return null;
+  return s.acceptanceCriteria
+    ? `${s.description}\n\nAcceptance criteria:\n${s.acceptanceCriteria}`
+    : s.description;
 }
 
 // ---- assignee picker ------------------------------------------------------------
@@ -350,6 +406,18 @@ function CreateDrawer({ project, onClose }: { project: string; onClose: () => vo
   const [tags, setTags] = useState("");
   const [iteration, setIteration] = useState("");
   const effType = type || typeNames[0] || "";
+  const aiOn = useCopilotConfigured();
+
+  const suggest = useMutation({
+    mutationFn: () => suggestWorkItem({ project, type: effType, title, description }),
+    onSuccess: ({ suggestion: s }) => {
+      if (s.title) setTitle(s.title);
+      const desc = suggestionText(s);
+      if (desc) setDescription(desc);
+      if (s.tags) setTags(s.tags);
+      if (s.type && typeNames.includes(s.type)) setType(s.type);
+    },
+  });
 
   const mut = useMutation({
     mutationFn: () =>
@@ -376,7 +444,19 @@ function CreateDrawer({ project, onClose }: { project: string; onClose: () => vo
       <Field label="Title">
         <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="What needs doing?" className={INPUT} autoFocus />
       </Field>
-      <Field label="Description">
+      <Field
+        label="Description"
+        action={
+          aiOn ? (
+            <AIButton
+              label="Draft with AI"
+              busy={suggest.isPending}
+              disabled={!title.trim() && !description.trim()}
+              onClick={() => suggest.mutate()}
+            />
+          ) : undefined
+        }
+      >
         <textarea
           value={description}
           onChange={(e) => setDescription(e.target.value)}
@@ -385,6 +465,7 @@ function CreateDrawer({ project, onClose }: { project: string; onClose: () => vo
           className={`${INPUT} resize-y`}
         />
       </Field>
+      {suggest.isError && <ErrorMsg error={suggest.error} />}
       <Field label="Assignee">
         <AssigneePicker
           display={assignee ? assignee.displayName ?? assignee.uniqueName : null}
@@ -469,6 +550,16 @@ function EditDrawer({ project, id, onClose }: { project: string; id: number; onC
     }
   }, [d, loadedRev]);
 
+  const aiOn = useCopilotConfigured();
+  const suggest = useMutation({
+    mutationFn: () => suggestWorkItem({ project, type: d?.type, title, description }),
+    onSuccess: ({ suggestion: s }) => {
+      const desc = suggestionText(s);
+      if (desc) setDescription(desc);
+      if (s.tags) setTags(s.tags);
+    },
+  });
+
   const typeStates =
     (typesQ.data?.value ?? []).find((t) => t.name === d?.type)?.states.map((s) => s.name) ?? [];
   const stateOptions = Array.from(new Set([d?.state ?? "", ...(typeStates.length ? typeStates : STATES)])).filter(Boolean);
@@ -529,7 +620,19 @@ function EditDrawer({ project, id, onClose }: { project: string; id: number; onC
           <Field label="Title">
             <input value={title} onChange={(e) => setTitle(e.target.value)} className={INPUT} />
           </Field>
-          <Field label="Description">
+          <Field
+            label="Description"
+            action={
+              aiOn ? (
+                <AIButton
+                  label="Improve with AI"
+                  busy={suggest.isPending}
+                  disabled={!title.trim() && !description.trim()}
+                  onClick={() => suggest.mutate()}
+                />
+              ) : undefined
+            }
+          >
             <textarea
               value={description}
               onChange={(e) => setDescription(e.target.value)}
@@ -538,6 +641,7 @@ function EditDrawer({ project, id, onClose }: { project: string; id: number; onC
               className={`${INPUT} resize-y`}
             />
           </Field>
+          {suggest.isError && <ErrorMsg error={suggest.error} />}
           <div className="grid grid-cols-2 gap-[12px]">
             <Field label="State">
               <Select value={state} onChange={setState} options={stateOptions} />

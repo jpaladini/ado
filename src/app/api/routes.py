@@ -5,7 +5,7 @@ import httpx
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
-from app import copilot, genie, insights
+from app import ai, copilot, genie, insights
 from app.ado.analytics import AnalyticsClient, OPEN_CATEGORIES
 from app.ado.client import ADOClient, ADOConfigError
 from app.config import settings
@@ -230,6 +230,31 @@ async def copilot_chat(body: CopilotBody) -> dict[str, object]:
         )
     except copilot.CopilotNotConfigured as e:
         raise HTTPException(status_code=503, detail=str(e))
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(
+            status_code=502, detail=f"Model endpoint returned {e.response.status_code}"
+        )
+    except httpx.HTTPError:
+        raise HTTPException(status_code=502, detail="Could not reach the model endpoint")
+
+
+class SuggestBody(BaseModel):
+    project: str
+    type: str | None = None
+    title: str | None = None
+    description: str | None = None
+
+
+@router.post("/ai/suggest-workitem")
+async def ai_suggest_workitem(body: SuggestBody) -> dict[str, object]:
+    if not ((body.title or "").strip() or (body.description or "").strip()):
+        raise HTTPException(status_code=422, detail="Provide a title or description to draft from")
+    try:
+        return await ai.suggest_work_item(body.project, body.model_dump(exclude={"project"}))
+    except ai.CopilotNotConfigured as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except ai.SuggestionParseError as e:
+        raise HTTPException(status_code=502, detail=f"Model returned no usable suggestion: {e}")
     except httpx.HTTPStatusError as e:
         raise HTTPException(
             status_code=502, detail=f"Model endpoint returned {e.response.status_code}"

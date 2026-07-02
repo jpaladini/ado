@@ -305,15 +305,26 @@ async def _verify_write_target(name: str, args: dict[str, Any], project: str) ->
         return f"Could not verify work item {args['id']}: {e}"
 
 
-async def _invoke(endpoint: str, messages: list[dict], tools: list[dict]) -> dict[str, Any]:
+async def _invoke(
+    endpoint: str,
+    messages: list[dict],
+    tools: list[dict],
+    *,
+    tool_choice: dict[str, Any] | None = None,
+    temperature: float | None = None,
+    max_tokens: int = 2000,
+) -> dict[str, Any]:
     """One chat-completions call to the serving endpoint (SP/PAT ambient auth)."""
     w = _workspace_client()
     headers = w.config.authenticate()  # refreshes tokens as needed
     url = f"{w.config.host.rstrip('/')}/serving-endpoints/{endpoint}/invocations"
+    payload: dict[str, Any] = {"messages": messages, "tools": tools, "max_tokens": max_tokens}
+    if tool_choice is not None:
+        payload["tool_choice"] = tool_choice
+    if temperature is not None:
+        payload["temperature"] = temperature
     async with httpx.AsyncClient(timeout=120.0) as client:
-        resp = await client.post(
-            url, headers=headers, json={"messages": messages, "tools": tools, "max_tokens": 2000}
-        )
+        resp = await client.post(url, headers=headers, json=payload)
         resp.raise_for_status()
         return resp.json()
 
