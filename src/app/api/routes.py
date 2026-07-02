@@ -324,6 +324,30 @@ async def ai_suggest_workitem(body: SuggestBody) -> dict[str, object]:
         raise HTTPException(status_code=502, detail="Could not reach the model endpoint")
 
 
+class ExplainBody(BaseModel):
+    project: str
+    repositoryId: str
+    path: str
+    branch: str
+
+
+@router.post("/ai/explain-file")
+async def ai_explain_file(body: ExplainBody) -> dict[str, object]:
+    try:
+        return await ai.explain_file(body.project, body.repositoryId, body.path, body.branch)
+    except ai.CopilotNotConfigured as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except ai.SuggestionParseError as e:
+        raise HTTPException(status_code=502, detail=f"Model returned no usable explanation: {e}")
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(
+            status_code=e.response.status_code if e.response.status_code == 404 else 502,
+            detail=f"Explain failed: upstream returned {e.response.status_code}",
+        )
+    except httpx.HTTPError:
+        raise HTTPException(status_code=502, detail="Could not reach Azure DevOps or the model endpoint")
+
+
 class ReviewBody(BaseModel):
     project: str
     repositoryId: str

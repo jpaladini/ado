@@ -193,6 +193,55 @@ async def test_review_pr_nothing_reviewable(monkeypatch):
     assert out["filesReviewed"] == 0 and out["comments"] == []
 
 
+# -- explain file -------------------------------------------------------------------
+
+
+class _FileADO:
+    def __init__(self, *a, **k):
+        pass
+
+    async def get_file(self, project, repo_id, path, version=None, version_type="branch"):
+        if path == "/logo.png":
+            return {"path": path, "binary": True, "truncated": False, "content": ""}
+        return {"path": path, "binary": False, "truncated": False,
+                "content": "def add(a, b):\n    return a + b\n"}
+
+
+@pytest.mark.asyncio
+async def test_explain_file(monkeypatch):
+    monkeypatch.setattr(ai, "ADOClient", _FileADO)
+    msg = {"tool_calls": [{"function": {"name": "explain_file", "arguments": json.dumps({
+        "explanation": "This file adds two numbers together for the calculator feature.",
+        "keyPoints": "- adds numbers\n- used by the calculator",
+    })}}]}
+    monkeypatch.setattr(copilot, "_invoke", _fake_invoke(msg))
+
+    out = await ai.explain_file("home", "r1", "/src/math.py", "dev")
+    assert "adds two numbers" in out["explanation"]
+    assert out["keyPoints"].startswith("- adds")
+
+
+@pytest.mark.asyncio
+async def test_explain_binary_short_circuits(monkeypatch):
+    monkeypatch.setattr(ai, "ADOClient", _FileADO)
+
+    async def must_not_call(*a, **k):
+        raise AssertionError("model must not be invoked for binary files")
+
+    monkeypatch.setattr(copilot, "_invoke", must_not_call)
+    out = await ai.explain_file("home", "r1", "/logo.png", "dev")
+    assert "binary" in out["explanation"].lower()
+
+
+@pytest.mark.asyncio
+async def test_explain_no_explanation_raises(monkeypatch):
+    monkeypatch.setattr(ai, "ADOClient", _FileADO)
+    msg = {"content": "I cannot explain this."}
+    monkeypatch.setattr(copilot, "_invoke", _fake_invoke(msg))
+    with pytest.raises(ai.SuggestionParseError):
+        await ai.explain_file("home", "r1", "/src/math.py", "dev")
+
+
 @pytest.mark.asyncio
 async def test_draft_lands_in_prompt(monkeypatch):
     captured: dict = {}

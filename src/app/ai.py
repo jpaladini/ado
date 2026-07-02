@@ -299,7 +299,8 @@ async def review_pr(
         comments, dropped = _validate_comments(list(review.get("comments") or []), lines_by_path)
         if span:
             span.set_outputs({"comments": len(comments), "dropped": dropped,
-                              "summary": str(review.get("summary") or "")[:300]})
+                              "summary": str(review.get("summary") or "")[:300],
+                              "usage": data.get("usage")})
 
     return {
         "summary": str(review.get("summary") or "").strip(),
@@ -309,6 +310,107 @@ async def review_pr(
         "dropped": dropped,
         "endpoint": endpoint,
     }
+
+
+# -- plain-language file explanation --------------------------------------------------
+
+EXPLAIN_MAX_CHARS = 12_000
+
+_EXPLAIN_TOOL = _schema(
+    "explain_file",
+    "Return the plain-language explanation of the file.",
+    {
+        "explanation": {
+            "type": "string",
+            "description": "3-6 short sentences a non-technical reader understands.",
+        },
+        "keyPoints": {
+            "type": "string",
+            "description": "2-4 '- ' bullets: the key things this file handles. Plain language.",
+        },
+    },
+    ["explanation"],
+)
+
+_EXPLAIN_SYSTEM = (
+    "You explain source files to smart people who do not write code. Call explain_file "
+    "exactly once. Rules:\n"
+    "- Say what the file IS, what it does for the product, and why someone would care — "
+    "in plain language. Name the product concepts, not the syntax.\n"
+    "- No jargon (no 'async', 'endpoint', 'class' etc. without a plain gloss). Never "
+    "quote code.\n"
+    "- 3-6 short sentences, plus 2-4 keyPoints bullets.\n"
+    "- If the content is truncated, explain what is visible without guessing the rest."
+)
+
+
+async def explain_file(project: str, repo_id: str, path: str, branch: str) -> dict[str, Any]:
+    """Fetch a file and return {explanation, keyPoints?, endpoint} for a
+    non-technical audience. Read-only; nothing is written anywhere."""
+    endpoint = resolve_endpoint()
+    f = await ADOClient().get_file(project, repo_id, path, version=branch)
+    if f["binary"]:
+        return {
+            "explanation": "This is a binary file (an image or other non-text asset) — there is no code to explain.",
+            "keyPoints": "",
+            "endpoint": endpoint,
+        }
+    content = (f["content"] or "")[:EXPLAIN_MAX_CHARS]
+    truncated = len(f["content"] or "") > EXPLAIN_MAX_CHARS
+
+    messages = [
+        {"role": "system", "content": _EXPLAIN_SYSTEM},
+        {
+            "role": "user",
+            "content": f"File: {path} (branch {branch})"
+            + (" — content truncated" if truncated else "")
+            + f"\n\n{content}",
+        },
+    ]
+
+    with _span("ai.explain", endpoint=endpoint, project=project) as span:
+        if span:
+            span.set_inputs({"path": path, "branch": branch, "chars": len(content)})
+        data = await copilot._invoke(
+            endpoint,
+            messages,
+            [_EXPLAIN_TOOL],
+            tool_choice={"type": "function", "function": {"name": "explain_file"}},
+            temperature=0.2,
+        )
+        msg = (data.get("choices") or [{}])[0].get("message") or {}
+        raw = _extract_named_call(msg, "explain_file")
+        explanation = str(raw.get("explanation") or "").strip()
+        if not explanation:
+            raise SuggestionParseError("model returned no explanation")
+        out = {
+            "explanation": explanation,
+            "keyPoints": str(raw.get("keyPoints") or "").strip(),
+            "endpoint": endpoint,
+        }
+        if span:
+            span.set_outputs({"explanation": explanation[:300], "usage": data.get("usage")})
+    return out
+
+
+def _extract_named_call(msg: dict[str, Any], tool_name: str) -> dict[str, Any]:
+    """Structured tool call by name, else bare-JSON content, else error."""
+    for tc in msg.get("tool_calls") or []:
+        fn = tc.get("function") or {}
+        if fn.get("name") == tool_name:
+            try:
+                return json.loads(fn.get("arguments") or "{}")
+            except json.JSONDecodeError:
+                pass
+    text = _content_text(msg.get("content")).strip()
+    if text.startswith("{"):
+        try:
+            loaded = json.loads(text)
+            if isinstance(loaded, dict):
+                return loaded
+        except json.JSONDecodeError:
+            pass
+    raise SuggestionParseError(f"no {tool_name} tool call or JSON object in the model response")
 
 
 async def suggest_work_item(project: str, draft: dict[str, Any]) -> dict[str, Any]:
@@ -341,6 +443,6 @@ async def suggest_work_item(project: str, draft: dict[str, Any]) -> dict[str, An
         msg = (data.get("choices") or [{}])[0].get("message") or {}
         suggestion = _normalize(_extract_suggestion(msg))
         if span:
-            span.set_outputs({"suggestion": suggestion})
+            span.set_outputs({"suggestion": suggestion, "usage": data.get("usage")})
 
     return {"suggestion": suggestion, "endpoint": endpoint}

@@ -359,6 +359,10 @@ export interface PrReview {
   endpoint: string;
 }
 
+export const explainFile = (p: string, rid: string, path: string, branch: string) =>
+  send<{ explanation: string; keyPoints: string; endpoint: string }>(
+    "/api/ai/explain-file", "POST", { project: p, repositoryId: rid, path, branch });
+
 export const reviewPr = (p: string, rid: string, prId: number, path?: string) =>
   send<PrReview>("/api/ai/review-pr", "POST", {
     project: p, repositoryId: rid, prId, ...(path ? { path } : {}),

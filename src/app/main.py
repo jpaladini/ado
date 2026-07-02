@@ -25,6 +25,7 @@ _ACTIONS = [
     (re.compile(r"^/api/copilot/chat$"), "POST", "copilot.chat"),
     (re.compile(r"^/api/ai/suggest-workitem$"), "POST", "ai.suggest"),
     (re.compile(r"^/api/ai/review-pr$"), "POST", "ai.review"),
+    (re.compile(r"^/api/ai/explain-file$"), "POST", "ai.explain"),
     (re.compile(r"^/api/analytics/refresh$"), "POST", "analytics.refresh"),
     (re.compile(r"^/api/settings$"), "PUT", "settings.update"),
 ]
