@@ -54,6 +54,26 @@ Pipeline → `databricks bundle deploy` → live app.**
 
 ## 4. The delivery loop (use it for every change)
 
+**The pipeline flow, component by component (this is THE mechanism — nothing deploys any
+other way):**
+
+```
+1. git push → GitHub repo jpaladini/ado, branch claude/web-first-app-planning-xsz5l0
+2.   triggers GitHub Action: .github/workflows/mirror-to-ado.yml
+3.     which force-pushes the same branch → Azure DevOps repo jpaladini85/home/_git/ado
+4.       agent creates a PR (branch → dev) via the ADO REST API
+5.         Jason merges the PR (human gate — protected branch)
+6.           merge to dev triggers Azure Pipeline: azure-pipelines.yml
+7.             pipeline: npm build → databricks bundle validate/deploy -t dev → bundle run
+8.               Databricks App `ado-companion` (and bundle jobs) updated in the workspace
+```
+
+Auth notes: the mirror Action authenticates with GitHub secrets `ADO_REPO_URL`/`ADO_PAT`;
+the pipeline authenticates to Databricks with pipeline variables `DATABRICKS_HOST` /
+`DATABRICKS_CLIENT_ID` / `DATABRICKS_CLIENT_SECRET` (service principal `dbx-svc-pcp`).
+
+Working recipe around that flow:
+
 ```
 edit code → build frontend if changed (cd frontend && npm run build; output is COMMITTED in src/static)
 → pytest (cd src && pytest)  → git commit + push (GitHub)
