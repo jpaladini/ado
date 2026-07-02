@@ -109,6 +109,17 @@ export interface Freshness {
   reason?: string;
 }
 
+export interface Whoami {
+  user: string;
+  source: string;
+  store: { available: boolean | null; reason?: string | null };
+}
+
+export const fetchWhoami = () => get<Whoami>("/api/whoami");
+export const fetchSettings = () => get<{ settings: Record<string, string> }>("/api/settings");
+export const putSetting = (key: string, value: string) =>
+  send<{ ok: boolean }>("/api/settings", "PUT", { key, value });
+
 export const fetchHealth = () => get<Health>("/api/health");
 export const askGenie = (question: string, conversationId?: string) =>
   send<GenieAnswer>("/api/genie/ask", "POST", { question, conversationId });

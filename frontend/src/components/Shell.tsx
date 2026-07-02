@@ -23,6 +23,7 @@ import PullRequests from "../screens/PullRequests";
 import Pipelines from "../screens/Pipelines";
 import Code from "../screens/Code";
 import Analytics from "../screens/Analytics";
+import UserFooter from "./UserFooter";
 
 const TABS = ["Overview", "Work Items", "Pull Requests", "Pipelines", "Code"] as const;
 type Tab = (typeof TABS)[number] | "Analytics";
@@ -122,18 +123,7 @@ export default function Shell({
           </span>
         </nav>
 
-        <div className="flex items-center gap-[10px] border-t border-border-2 p-[12px]">
-          <div className="flex h-[30px] w-[30px] items-center justify-center rounded-full bg-ink-bg text-[11px] font-semibold text-ink-fg">
-            {initials(me)}
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="truncate text-[12px] font-semibold text-text">{me ?? "—"}</div>
-            <div className="flex items-center gap-[4px] text-[10.5px] text-ok">
-              <span className="h-[6px] w-[6px] rounded-full bg-c-green" />
-              connected
-            </div>
-          </div>
-        </div>
+        <UserFooter fallbackName={me} projects={projects} />
       </aside>
 
       {/* MAIN */}
@@ -224,8 +214,3 @@ function ProjectSwitcher({
   );
 }
 
-function initials(name: string | null): string {
-  if (!name) return "—";
-  const parts = name.trim().split(/\s+/);
-  return ((parts[0]?.[0] ?? "") + (parts[1]?.[0] ?? "")).toUpperCase() || name.slice(0, 2).toUpperCase();
-}

@@ -2,13 +2,15 @@
 from typing import Awaitable, Callable, TypeVar
 
 import httpx
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from app import genie, insights
 from app.ado.analytics import AnalyticsClient, OPEN_CATEGORIES
 from app.ado.client import ADOClient, ADOConfigError
 from app.config import settings
+from app.identity import request_user, user_email
+from app.store import store
 
 router = APIRouter(prefix="/api")
 
@@ -109,6 +111,38 @@ async def analytics(project: str, range: str = Query("7d")) -> dict[str, object]
 @router.get("/projects/{project}/repos/{repo_id}/commits")
 async def commits(project: str, repo_id: str, top: int = Query(25, le=100)) -> dict[str, object]:
     return {"value": await _call(lambda c: c.list_commits(project, repo_id, top=top))}
+
+
+# -- identity, settings, audit ----------------------------------------------------
+
+
+@router.get("/whoami")
+async def whoami(request: Request) -> dict[str, object]:
+    ident = request_user(request)
+    return {**ident, "store": store.status()}
+
+
+@router.get("/settings")
+async def get_settings(request: Request) -> dict[str, object]:
+    return {"settings": await store.get_settings(user_email(request))}
+
+
+class SettingBody(BaseModel):
+    key: str
+    value: str
+
+
+@router.put("/settings")
+async def put_setting(request: Request, body: SettingBody) -> dict[str, object]:
+    if not body.key.strip():
+        raise HTTPException(status_code=422, detail="key is empty")
+    await store.put_setting(user_email(request), body.key.strip(), body.value)
+    return {"ok": True}
+
+
+@router.get("/audit")
+async def audit_log(limit: int = Query(50, le=200)) -> dict[str, object]:
+    return {"value": await store.recent_audit(limit)}
 
 
 # -- analytics data freshness ---------------------------------------------------

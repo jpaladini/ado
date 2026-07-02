@@ -193,6 +193,25 @@ missing; scheduled ingest fails at startup → G0 missing; freshness bar hidden 
 
 ---
 
+## App-state store activation (Phase 4A — settings, audit log)
+
+The app persists per-user settings and an audit log in Delta
+(`{store_catalog}.{store_schema}`, default `workspace.ado_companion_app`). The app
+creates its **tables**, but the **schema + grants** are a HUMAN step (SQL editor):
+
+```sql
+CREATE SCHEMA IF NOT EXISTS workspace.ado_companion_app;
+GRANT USE SCHEMA, CREATE TABLE, SELECT, MODIFY
+  ON SCHEMA workspace.ado_companion_app TO `<app-sp-client-id>`;
+```
+
+Verify: `GET <app-url>/api/whoami` → `"store": {"available": true}`. Without the grant
+the app still works — settings/audit just report unavailable (`activity log: off` in the
+user popover). Identity comes from the `X-Forwarded-Email` /
+`X-Forwarded-Preferred-Username` headers Databricks Apps injects; `/api/whoami.source`
+shows which header matched (`none` means the platform isn't forwarding identity —
+check the app's user authorization settings).
+
 ## Operational rules (learned in production bring-up — do not relearn these)
 
 1. **One owner per Databricks resource.** The app must be created/updated only by the

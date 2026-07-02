@@ -1,11 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   fetchAnalytics,
   fetchBuilds,
   fetchCommits,
   fetchPullRequests,
   fetchRepos,
+  fetchSettings,
   fetchWorkItems,
   type WorkItem,
 } from "../api";
@@ -35,6 +36,14 @@ const isClosedish = (s: string) => isDone(s) || lc(s) === "removed";
 
 export default function Overview({ project }: { project: string }) {
   const [range, setRange] = useState<Range>("7d");
+  const rangeTouched = useRef(false);
+
+  // apply the user's default_range setting until they pick one themselves
+  const settings = useQuery({ queryKey: ["settings"], queryFn: fetchSettings, staleTime: 60_000 });
+  const preferred = settings.data?.settings?.default_range as Range | undefined;
+  useEffect(() => {
+    if (!rangeTouched.current && preferred && RANGES.includes(preferred)) setRange(preferred);
+  }, [preferred]);
 
   const analytics = useQuery({
     queryKey: ["analytics", project, range],
@@ -109,7 +118,10 @@ export default function Overview({ project }: { project: string }) {
             return (
               <span
                 key={r}
-                onClick={() => setRange(r)}
+                onClick={() => {
+                  rangeTouched.current = true;
+                  setRange(r);
+                }}
                 className={`cursor-pointer px-[13px] py-[7px] text-[12px] ${i === 1 ? "border-x border-border" : ""} ${
                   on ? "bg-bg font-semibold text-text" : "font-medium text-muted"
                 }`}

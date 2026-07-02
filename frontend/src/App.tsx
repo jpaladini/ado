@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { fetchHealth, fetchMe, fetchProjects, type Project } from "./api";
+import { fetchHealth, fetchMe, fetchProjects, fetchSettings, type Project } from "./api";
 import Shell from "./components/Shell";
 import { ToastProvider } from "./components/Toast";
 import { Spark } from "./components/icons";
@@ -11,15 +11,21 @@ export default function App() {
 
   const projects = useQuery({ queryKey: ["projects"], queryFn: fetchProjects, enabled: configured });
   const me = useQuery({ queryKey: ["me"], queryFn: fetchMe, enabled: configured });
+  const settings = useQuery({ queryKey: ["settings"], queryFn: fetchSettings, enabled: configured });
 
-  // selected project, synced to ?project=<name>
+  // selected project: URL ?project= wins, then the user's default_project setting
   const [projectName, setProjectName] = useState<string | null>(
     () => new URLSearchParams(location.search).get("project"),
   );
   const list = projects.data?.value ?? [];
+  const defaultProject = settings.data?.settings?.default_project;
   const selected = useMemo(
-    () => list.find((p) => p.name === projectName) ?? list[0] ?? null,
-    [list, projectName],
+    () =>
+      list.find((p) => p.name === projectName) ??
+      list.find((p) => p.name === defaultProject) ??
+      list[0] ??
+      null,
+    [list, projectName, defaultProject],
   );
 
   useEffect(() => {

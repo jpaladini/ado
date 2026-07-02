@@ -15,6 +15,9 @@ class Settings(BaseSettings):
     # Where the ingest job lands the analytics Delta tables.
     analytics_catalog: str = "workspace"
     analytics_schema: str = "ado_analytics"
+    # App-state store (settings, audit log, AI sessions) — Delta via the warehouse.
+    store_catalog: str = "workspace"
+    store_schema: str = "ado_companion_app"
 
     @property
     def ado_configured(self) -> bool:
