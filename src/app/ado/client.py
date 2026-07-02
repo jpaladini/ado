@@ -109,6 +109,28 @@ class ADOClient:
 
     # -- work items -----------------------------------------------------------
 
+    async def get_work_item(self, work_item_id: int) -> dict[str, Any]:
+        """Full detail for one work item (all fields come back by default)."""
+        data = await self._get(f"/_apis/wit/workitems/{work_item_id}")
+        f = data.get("fields", {})
+        return {
+            "id": data.get("id"),
+            "rev": data.get("rev"),
+            "title": f.get("System.Title"),
+            "state": f.get("System.State"),
+            "type": f.get("System.WorkItemType"),
+            "reason": f.get("System.Reason"),
+            "assignedTo": _user(f.get("System.AssignedTo")),
+            "assignedToUnique": (f.get("System.AssignedTo") or {}).get("uniqueName"),
+            "description": f.get("System.Description") or "",
+            "tags": [t.strip() for t in (f.get("System.Tags") or "").split(";") if t.strip()],
+            "iterationPath": f.get("System.IterationPath"),
+            "areaPath": f.get("System.AreaPath"),
+            "createdBy": _user(f.get("System.CreatedBy")),
+            "createdDate": f.get("System.CreatedDate"),
+            "changedDate": f.get("System.ChangedDate"),
+        }
+
     async def list_work_items(self, project: str, top: int = 100) -> list[dict[str, Any]]:
         """Run a WIQL query for the project's most-recently-changed items, then
         batch-fetch their fields."""
@@ -131,6 +153,7 @@ class ADOClient:
             "System.WorkItemType",
             "System.AssignedTo",
             "System.ChangedDate",
+            "System.Tags",
         ]
         batch = await self._post(
             "/_apis/wit/workitemsbatch", {"ids": ids, "fields": fields}
@@ -146,9 +169,98 @@ class ADOClient:
                     "type": f.get("System.WorkItemType"),
                     "assignedTo": _user(f.get("System.AssignedTo")),
                     "changedDate": f.get("System.ChangedDate"),
+                    "tags": [t.strip() for t in (f.get("System.Tags") or "").split(";") if t.strip()],
                 }
             )
         return out
+
+    async def list_work_item_types(self, project: str) -> list[dict[str, Any]]:
+        """Creatable work item types (hidden category filtered out) with their states."""
+        proj = quote(project, safe="")
+        types = await self._get(f"/{proj}/_apis/wit/workitemtypes")
+        try:
+            hidden_cat = await self._get(f"/{proj}/_apis/wit/workitemtypecategories/Microsoft.HiddenCategory")
+            hidden = {t.get("name") for t in hidden_cat.get("workItemTypes", [])}
+        except httpx.HTTPStatusError:
+            hidden = set()
+        out = []
+        for t in types.get("value", []):
+            if t["name"] in hidden:
+                continue
+            out.append(
+                {
+                    "name": t["name"],
+                    "states": [
+                        {"name": s.get("name"), "category": s.get("category")}
+                        for s in t.get("states", [])
+                    ],
+                }
+            )
+        return out
+
+    async def list_iterations(self, project: str) -> list[str]:
+        """Iteration paths usable in System.IterationPath (root first)."""
+        proj = quote(project, safe="")
+        data = await self._get(
+            f"/{proj}/_apis/wit/classificationnodes/Iterations", params={"$depth": 10}
+        )
+
+        def walk(node: dict[str, Any], prefix: str) -> list[str]:
+            path = f"{prefix}\\{node['name']}" if prefix else node["name"]
+            paths = [path]
+            for child in node.get("children") or []:
+                paths.extend(walk(child, path))
+            return paths
+
+        return walk(data, "")
+
+    async def search_identities(self, query: str, max_results: int = 10) -> list[dict[str, Any]]:
+        """User search for the assignee picker (Identity Picker API — same one the
+        ADO web UI uses; requires both MinResults and MaxResults)."""
+        body = {
+            "query": query,
+            "identityTypes": ["user"],
+            "operationScopes": ["ims", "source"],
+            "options": {"MinResults": min(5, max_results), "MaxResults": max_results},
+            "properties": ["DisplayName", "Mail", "SamAccountName", "Active"],
+        }
+        data = await self._send(
+            "POST",
+            "/_apis/IdentityPicker/Identities",
+            body=body,
+            params={"api-version": "7.1-preview.1"},
+        )
+        out = []
+        for result in data.get("results", []):
+            for ident in result.get("identities", []):
+                unique = ident.get("mail") or ident.get("samAccountName") or ident.get("signInAddress")
+                if not unique:
+                    continue
+                out.append(
+                    {
+                        "displayName": ident.get("displayName"),
+                        "uniqueName": unique,
+                        "active": ident.get("active", True),
+                    }
+                )
+        return out
+
+    async def list_work_item_comments(self, project: str, work_item_id: int) -> list[dict[str, Any]]:
+        proj = quote(project, safe="")
+        data = await self._get(
+            f"/{proj}/_apis/wit/workItems/{work_item_id}/comments",
+            params={"api-version": "7.1-preview.3", "order": "desc"},
+        )
+        return [
+            {
+                "id": c.get("id"),
+                "text": c.get("text") or "",
+                "format": c.get("format"),
+                "createdBy": _user(c.get("createdBy")),
+                "createdDate": c.get("createdDate"),
+            }
+            for c in data.get("comments", [])
+        ]
 
     # -- pull requests --------------------------------------------------------
 
@@ -220,13 +332,38 @@ class ADOClient:
 
     # -- writes ---------------------------------------------------------------
 
+    @staticmethod
+    def _patch_ops(fields: dict[str, Any]) -> list[dict[str, Any]]:
+        """JSON-Patch ops for a field dict; a None value clears the field (e.g. unassign)."""
+        return [
+            {"op": "remove", "path": f"/fields/{k}"}
+            if v is None
+            else {"op": "add", "path": f"/fields/{k}", "value": v}
+            for k, v in fields.items()
+        ]
+
+    async def create_work_item(
+        self, project: str, wi_type: str, fields: dict[str, Any]
+    ) -> dict[str, Any]:
+        """POST a new work item via JSON Patch. The type is a URL segment prefixed
+        with a literal '$' (e.g. /wit/workitems/$Task)."""
+        proj = quote(project, safe="")
+        type_seg = quote(wi_type, safe="")
+        data = await self._send(
+            "POST",
+            f"/{proj}/_apis/wit/workitems/${type_seg}",
+            body=self._patch_ops(fields),
+            content_type="application/json-patch+json",
+        )
+        f = data.get("fields", {})
+        return {"id": data.get("id"), "title": f.get("System.Title"), "state": f.get("System.State")}
+
     async def update_work_item(self, work_item_id: int, fields: dict[str, Any]) -> dict[str, Any]:
         """PATCH work item fields via JSON Patch (e.g. {'System.State': 'Active'})."""
-        ops = [{"op": "add", "path": f"/fields/{k}", "value": v} for k, v in fields.items()]
         return await self._send(
             "PATCH",
             f"/_apis/wit/workitems/{work_item_id}",
-            body=ops,
+            body=self._patch_ops(fields),
             content_type="application/json-patch+json",
         )
 

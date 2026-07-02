@@ -36,6 +36,62 @@ export interface WorkItem {
   type: string;
   assignedTo: string | null;
   changedDate?: string;
+  tags?: string[];
+}
+
+export interface WorkItemDetail {
+  id: number;
+  rev: number;
+  title: string;
+  state: string;
+  type: string;
+  reason?: string | null;
+  assignedTo: string | null;
+  assignedToUnique: string | null;
+  description: string; // HTML as stored by ADO
+  tags: string[];
+  iterationPath: string | null;
+  areaPath: string | null;
+  createdBy: string | null;
+  createdDate?: string;
+  changedDate?: string;
+}
+
+export interface WorkItemComment {
+  id: number;
+  text: string; // HTML
+  format?: string;
+  createdBy: string | null;
+  createdDate?: string;
+}
+
+export interface Identity {
+  displayName: string | null;
+  uniqueName: string;
+  active: boolean;
+}
+
+export interface WorkItemType {
+  name: string;
+  states: { name: string; category: string }[];
+}
+
+export interface WorkItemCreatePayload {
+  type: string;
+  title: string;
+  description?: string;
+  assignedTo?: string;
+  tags?: string; // "a; b"
+  iterationPath?: string;
+}
+
+export interface WorkItemUpdatePayload {
+  title?: string;
+  description?: string;
+  assignedTo?: string; // "" clears the assignment
+  state?: string;
+  tags?: string;
+  iterationPath?: string;
 }
 
 export interface PullRequest {
@@ -143,6 +199,16 @@ export const fetchAnalytics = (p: string, range: string) =>
 
 export const fetchWorkItems = (p: string) =>
   get<{ value: WorkItem[] }>(`/api/projects/${enc(p)}/workitems`);
+export const fetchWorkItemDetail = (p: string, id: number) =>
+  get<WorkItemDetail>(`/api/projects/${enc(p)}/workitems/${id}`);
+export const fetchWorkItemComments = (p: string, id: number) =>
+  get<{ value: WorkItemComment[] }>(`/api/projects/${enc(p)}/workitems/${id}/comments`);
+export const fetchWorkItemTypes = (p: string) =>
+  get<{ value: WorkItemType[] }>(`/api/projects/${enc(p)}/workitemtypes`);
+export const fetchIterations = (p: string) =>
+  get<{ value: string[] }>(`/api/projects/${enc(p)}/iterations`);
+export const searchIdentities = (q: string) =>
+  get<{ value: Identity[] }>(`/api/identities?q=${enc(q)}`);
 export const fetchPullRequests = (p: string, status = "active") =>
   get<{ value: PullRequest[] }>(`/api/projects/${enc(p)}/pullrequests?status=${status}`);
 export const fetchBuilds = (p: string) =>
@@ -156,6 +222,13 @@ export const fetchCommits = (p: string, repoId: string) =>
 
 export const setWorkItemState = (p: string, id: number, state: string) =>
   send(`/api/projects/${enc(p)}/workitems/${id}/state`, "PATCH", { state });
+
+export const createWorkItem = (p: string, body: WorkItemCreatePayload) =>
+  send<{ id: number; title: string; state: string }>(
+    `/api/projects/${enc(p)}/workitems`, "POST", body);
+
+export const updateWorkItem = (p: string, id: number, body: WorkItemUpdatePayload) =>
+  send<WorkItemDetail>(`/api/projects/${enc(p)}/workitems/${id}`, "PATCH", body);
 
 export const addWorkItemComment = (p: string, id: number, text: string) =>
   send(`/api/projects/${enc(p)}/workitems/${id}/comments`, "POST", { text });

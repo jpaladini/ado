@@ -104,6 +104,12 @@ export const IconComment = (p: P) => (
   </svg>
 );
 
+export const IconX = (p: P) => (
+  <svg {...base(16, p)}>
+    <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+  </svg>
+);
+
 export const IconCheck = (p: P) => (
   <svg {...base(16, p)}>
     <path d="M3 8.5l3 3 7-7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />

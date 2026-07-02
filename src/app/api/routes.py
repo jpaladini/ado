@@ -55,6 +55,31 @@ async def work_items(project: str, top: int = Query(100, le=200)) -> dict[str, o
     return {"value": await _call(lambda c: c.list_work_items(project, top=top))}
 
 
+@router.get("/projects/{project}/workitems/{wid}")
+async def work_item_detail(project: str, wid: int) -> dict[str, object]:
+    return await _call(lambda c: c.get_work_item(wid))
+
+
+@router.get("/projects/{project}/workitems/{wid}/comments")
+async def work_item_comments(project: str, wid: int) -> dict[str, object]:
+    return {"value": await _call(lambda c: c.list_work_item_comments(project, wid))}
+
+
+@router.get("/projects/{project}/workitemtypes")
+async def work_item_types(project: str) -> dict[str, object]:
+    return {"value": await _call(lambda c: c.list_work_item_types(project))}
+
+
+@router.get("/projects/{project}/iterations")
+async def iterations(project: str) -> dict[str, object]:
+    return {"value": await _call(lambda c: c.list_iterations(project))}
+
+
+@router.get("/identities")
+async def identities(q: str = Query(..., min_length=1)) -> dict[str, object]:
+    return {"value": await _call(lambda c: c.search_identities(q.strip()))}
+
+
 @router.get("/projects/{project}/pullrequests")
 async def pull_requests(
     project: str, status: str = Query("active"), top: int = Query(50, le=100)
@@ -186,6 +211,40 @@ class StateBody(BaseModel):
     state: str
 
 
+# BFF body keys → ADO field reference names (shared by create + update).
+_WI_FIELD_MAP = {
+    "title": "System.Title",
+    "description": "System.Description",
+    "assignedTo": "System.AssignedTo",
+    "state": "System.State",
+    "tags": "System.Tags",
+    "iterationPath": "System.IterationPath",
+    "areaPath": "System.AreaPath",
+}
+
+
+class WorkItemCreate(BaseModel):
+    type: str
+    title: str
+    description: str | None = None
+    assignedTo: str | None = None
+    tags: str | None = None  # "a; b"
+    iterationPath: str | None = None
+
+
+class WorkItemUpdate(BaseModel):
+    """All optional; only keys the client sent are patched. An explicit empty
+    string on assignedTo clears the field (unassign)."""
+
+    title: str | None = None
+    description: str | None = None
+    assignedTo: str | None = None
+    state: str | None = None
+    tags: str | None = None
+    iterationPath: str | None = None
+    areaPath: str | None = None
+
+
 class CommentBody(BaseModel):
     text: str
 
@@ -196,6 +255,32 @@ class VoteBody(BaseModel):
 
 class PrStatusBody(BaseModel):
     status: str  # "abandoned" | "active"
+
+
+@router.post("/projects/{project}/workitems")
+async def create_work_item(project: str, body: WorkItemCreate) -> dict[str, object]:
+    if not body.type.strip() or not body.title.strip():
+        raise HTTPException(status_code=422, detail="type and title are required")
+    fields = {
+        _WI_FIELD_MAP[k]: v
+        for k, v in body.model_dump(exclude={"type"}, exclude_none=True).items()
+        if str(v).strip()
+    }
+    return await _call(lambda c: c.create_work_item(project, body.type.strip(), fields))
+
+
+@router.patch("/projects/{project}/workitems/{wid}")
+async def update_work_item(project: str, wid: int, body: WorkItemUpdate) -> dict[str, object]:
+    sent = body.model_dump(exclude_unset=True)
+    # Empty assignedTo → clear the field (None becomes a JSON-Patch remove op).
+    fields = {
+        _WI_FIELD_MAP[k]: (None if k == "assignedTo" and not str(v or "").strip() else v)
+        for k, v in sent.items()
+    }
+    if not fields:
+        raise HTTPException(status_code=422, detail="no fields to update")
+    await _call(lambda c: c.update_work_item(wid, fields))
+    return await _call(lambda c: c.get_work_item(wid))
 
 
 @router.patch("/projects/{project}/workitems/{wid}/state")

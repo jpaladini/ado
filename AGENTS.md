@@ -241,7 +241,12 @@ check the app's user authorization settings).
    permissions dialog). Use the Permissions REST API / SDK instead — e.g. from a notebook:
    `w.api_client.do("PATCH", "/api/2.0/permissions/jobs/<id>", body={"access_control_list":
    [{"service_principal_name": "<app-sp-client-id>", "permission_level": "CAN_MANAGE_RUN"}]})`.
-9. **The two data planes drift.** CRUD tabs are live (ADO REST), the Overview is
+9. **Identity search uses the Identity Picker API** (`POST /_apis/IdentityPicker/Identities`,
+   `api-version=7.1-preview.1` — the same endpoint the ADO web UI uses; org-level, not
+   project-scoped). Its `options` must include **both** `MinResults` and `MaxResults` or
+   the call 400s. Assigning a work item accepts the identity's mail/uniqueName as the
+   `System.AssignedTo` value.
+10. **The two data planes drift.** CRUD tabs are live (ADO REST), the Overview is
    near-live (ADO Analytics OData), Genie is batch (Delta, refreshed by the ingest
    schedule or the Refresh button). Surface freshness in the UI; never imply Genie
    answers are real-time.

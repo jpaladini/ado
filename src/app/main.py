@@ -16,6 +16,8 @@ app.include_router(api_router)
 _ACTIONS = [
     (re.compile(r"/workitems/\d+/state$"), "PATCH", "workitem.state"),
     (re.compile(r"/workitems/\d+/comments$"), "POST", "workitem.comment"),
+    (re.compile(r"/workitems$"), "POST", "workitem.create"),
+    (re.compile(r"/workitems/\d+$"), "PATCH", "workitem.update"),
     (re.compile(r"/pullrequests/\d+/vote$"), "PUT", "pr.approve"),
     (re.compile(r"/pullrequests/\d+$"), "PATCH", "pr.status"),
     (re.compile(r"^/api/genie/ask$"), "POST", "genie.ask"),

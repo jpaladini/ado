@@ -62,6 +62,60 @@ ROUTES = {
     ("GET", "/Demo/_apis/git/repositories"): {
         "value": [{"id": "r1", "name": "core", "defaultBranch": "refs/heads/main"}]
     },
+    ("GET", "/_apis/wit/workitems/7"): {
+        "id": 7,
+        "rev": 3,
+        "fields": {
+            "System.Title": "Fix login",
+            "System.State": "Doing",
+            "System.WorkItemType": "Task",
+            "System.AssignedTo": {"displayName": "Ada", "uniqueName": "ada@example.com"},
+            "System.Description": "<div>steps</div>",
+            "System.Tags": "auth; p1",
+            "System.IterationPath": "Demo\\Sprint 1",
+            "System.AreaPath": "Demo",
+            "System.CreatedBy": {"displayName": "Lin"},
+            "System.CreatedDate": "2026-06-01T00:00:00Z",
+            "System.ChangedDate": "2026-06-20T00:00:00Z",
+        },
+    },
+    ("GET", "/Demo/_apis/wit/workitemtypes"): {
+        "value": [
+            {"name": "Task", "states": [{"name": "To Do", "category": "Proposed"}, {"name": "Doing", "category": "InProgress"}]},
+            {"name": "Code Review Request", "states": [{"name": "Requested", "category": "Proposed"}]},
+        ]
+    },
+    ("GET", "/Demo/_apis/wit/workitemtypecategories/Microsoft.HiddenCategory"): {
+        "workItemTypes": [{"name": "Code Review Request"}]
+    },
+    ("GET", "/Demo/_apis/wit/classificationnodes/Iterations"): {
+        "name": "Demo",
+        "children": [
+            {"name": "Sprint 1"},
+            {"name": "Sprint 2", "children": [{"name": "Week 1"}]},
+        ],
+    },
+    ("POST", "/_apis/IdentityPicker/Identities"): {
+        "results": [
+            {
+                "identities": [
+                    {"displayName": "Ada L", "mail": "ada@example.com", "active": True},
+                    {"displayName": "No Mail", "mail": None, "samAccountName": None},
+                ]
+            }
+        ]
+    },
+    ("GET", "/Demo/_apis/wit/workItems/7/comments"): {
+        "comments": [
+            {
+                "id": 11,
+                "text": "<div>looks good</div>",
+                "format": "html",
+                "createdBy": {"displayName": "Lin"},
+                "createdDate": "2026-06-21T00:00:00Z",
+            }
+        ]
+    },
     ("GET", "/Demo/_apis/git/repositories/r1/commits"): {
         "value": [
             {
@@ -119,6 +173,42 @@ async def test_repos_and_commits(client: ADOClient):
     assert commits[0]["author"] == "Ada"
 
 
+@pytest.mark.asyncio
+async def test_work_item_detail(client: ADOClient):
+    wi = await client.get_work_item(7)
+    assert wi["title"] == "Fix login" and wi["state"] == "Doing"
+    assert wi["assignedTo"] == "Ada" and wi["assignedToUnique"] == "ada@example.com"
+    assert wi["tags"] == ["auth", "p1"]
+    assert wi["iterationPath"] == "Demo\\Sprint 1"
+
+
+@pytest.mark.asyncio
+async def test_work_item_types_filters_hidden(client: ADOClient):
+    types = await client.list_work_item_types("Demo")
+    assert [t["name"] for t in types] == ["Task"]
+    assert types[0]["states"][0] == {"name": "To Do", "category": "Proposed"}
+
+
+@pytest.mark.asyncio
+async def test_iterations_flatten(client: ADOClient):
+    paths = await client.list_iterations("Demo")
+    assert paths == ["Demo", "Demo\\Sprint 1", "Demo\\Sprint 2", "Demo\\Sprint 2\\Week 1"]
+
+
+@pytest.mark.asyncio
+async def test_identity_search(client: ADOClient):
+    ids = await client.search_identities("ada")
+    assert ids == [{"displayName": "Ada L", "uniqueName": "ada@example.com", "active": True}]
+    # the mail-less identity is dropped (nothing to assign by)
+
+
+@pytest.mark.asyncio
+async def test_comments_list(client: ADOClient):
+    comments = await client.list_work_item_comments("Demo", 7)
+    assert comments[0]["text"] == "<div>looks good</div>"
+    assert comments[0]["createdBy"] == "Lin"
+
+
 # -- writes: assert the outgoing request is constructed correctly -------------
 
 
@@ -149,6 +239,37 @@ async def test_update_work_item_uses_json_patch(capturing):
     assert method == "PATCH" and path == "/_apis/wit/workitems/42"
     assert headers["content-type"] == "application/json-patch+json"
     assert json.loads(body) == [{"op": "add", "path": "/fields/System.State", "value": "Active"}]
+
+
+@pytest.mark.asyncio
+async def test_create_work_item_json_patch(capturing):
+    import json
+
+    client, cap = capturing
+    await client.create_work_item(
+        "Demo", "User Story", {"System.Title": "New", "System.Tags": "a; b"}
+    )
+    method, _path, raw, headers, body = cap[-1]
+    assert method == "POST"
+    assert "/Demo/_apis/wit/workitems/$User%20Story" in raw  # type is a $-prefixed segment
+    assert headers["content-type"] == "application/json-patch+json"
+    assert json.loads(body) == [
+        {"op": "add", "path": "/fields/System.Title", "value": "New"},
+        {"op": "add", "path": "/fields/System.Tags", "value": "a; b"},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_update_none_value_becomes_remove_op(capturing):
+    import json
+
+    client, cap = capturing
+    await client.update_work_item(42, {"System.AssignedTo": None, "System.Title": "T"})
+    _method, _path, _raw, _headers, body = cap[-1]
+    assert json.loads(body) == [
+        {"op": "remove", "path": "/fields/System.AssignedTo"},
+        {"op": "add", "path": "/fields/System.Title", "value": "T"},
+    ]
 
 
 @pytest.mark.asyncio

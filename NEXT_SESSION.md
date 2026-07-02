@@ -30,9 +30,11 @@ Pipeline → `databricks bundle deploy` → live app.**
    curl -s -H "Authorization: Bearer $DTOK" "$DBX/api/2.0/apps/ado-companion" | python3 -m json.tool
    curl -s -u ":$APAT" "https://dev.azure.com/jpaladini85/home/_apis/projects?api-version=7.1"
    ```
-3. Git: the repo clones from GitHub (`jpaladini/ado`); work happens on branch
-   **`claude/web-first-app-planning-xsz5l0`** (the permanent trunk for agent work — do not
-   rename). Push normally; a GitHub Action mirrors every push to the ADO repo.
+3. Git: the repo clones from GitHub (`jpaladini/ado`); work happens on **whatever branch
+   the session was started with** (e.g. `claude/resume-next-session-pbbmrk` on 2026-07-02;
+   earlier sessions used `claude/web-first-app-planning-xsz5l0`). The mirror Action pushes
+   **any** non-protected branch to a same-named branch in ADO, so the PR-into-`dev` loop
+   works from any session branch — just source the ADO PR from the branch you pushed.
 
 ## 3. Canonical identifiers (verified working)
 
@@ -103,20 +105,21 @@ API reads, Genie space creation) is allowed.
 - Phase 4A (identity/settings/audit): **merged & deployed** (PRs #6, #7). Store schema +
   grants exist; tables auto-created; settings popover works.
 
-**In flight:**
-- **PR #8** (may already be merged — check): `whoami` actively probes the store + popover
-  re-checks on open. Fixes the "activity log: off" stale-cache display. After merge,
-  Jason should confirm the popover says **on** and that a work-item state change produces
-  a row in `workspace.ado_companion_app.audit_log` (writes are batched ~3–5s).
+**Merged 2026-07-02:** PR #8 (whoami store probe). Jason should still confirm the popover
+says activity log **on** and a state change lands a row in
+`workspace.ado_companion_app.audit_log`.
 
-**Next up (the agreed order): Phase 4B → 4C → 4D → 4E → 4F** (full detail in PLAN.md §5a):
-- **4B — Work items full CRUD** *(START HERE)*: "+ New item" create panel (type, title,
-  markdown description, assignee picker via ADO identity search, tags, iteration); row
-  click → edit drawer (title/description/assignee/state/tags + comment history).
-  Backend needs: `POST .../wit/workitems/${type}` (JSON-Patch create), expanded
-  `update_work_item` fields, identity search endpoint, comments list. ADO REST docs
-  patterns are already established in `src/app/ado/client.py`.
-- **4C — Reports**: Analytics tab → report widgets w/ assignee/type/date filters (OData).
+**In flight:**
+- **Phase 4B — Work items full CRUD** (PR #9, branch `claude/resume-next-session-pbbmrk`):
+  "+ New item" drawer (type/title/description/assignee search/tags/iteration), row-click
+  edit drawer (title/description/assignee/state/tags/iteration + comment history + add
+  comment), tags column in the table. Backend: create_work_item, get_work_item,
+  list_work_item_comments, search_identities (IdentityPicker — needs Min+MaxResults),
+  list_work_item_types (hidden category filtered), list_iterations; BFF routes for all;
+  audit actions workitem.create/update. All verified against live ADO + 24 pytest cases.
+
+**Next up (the agreed order): 4C → 4D → 4E → 4F** (full detail in PLAN.md §5a):
+- **4C — Reports** *(START HERE next)*: Analytics tab → report widgets w/ assignee/type/date filters (OData).
 - **4D — AI tab**: move Genie chat to dedicated tab + per-user session history (store).
 - **4E — Report builder**: visual OData query builder + saved reports (store).
 - **4F — Code browser**: branch picker, file tree, file viewer w/ highlighting.
