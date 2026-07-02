@@ -1,6 +1,7 @@
 """Agent-loop tests: scripted endpoint responses, no workspace or ADO needed."""
 import json
 
+import httpx
 import pytest
 
 from app import copilot
@@ -115,6 +116,143 @@ async def test_history_and_reasoning_content_blocks(monkeypatch):
     assert out["reply"] == "Final answer."
     roles = [m["role"] for m in captured["messages"]]
     assert roles == ["system", "user", "assistant", "user"]
+
+
+class _FakeADO:
+    """get_work_item 404s for id 999, succeeds otherwise."""
+
+    def __init__(self, *a, **k):
+        pass
+
+    async def get_work_item(self, wid):
+        if wid == 999:
+            req = httpx.Request("GET", "https://ado/_apis/wit/workitems/999")
+            raise httpx.HTTPStatusError("404", request=req, response=httpx.Response(404, request=req))
+        return {"id": wid, "title": "exists"}
+
+
+@pytest.mark.asyncio
+async def test_update_proposal_against_missing_item_is_rejected(monkeypatch):
+    """A guessed ID never becomes a proposal; the model gets told to look first."""
+    responses = iter([
+        _mk_response(tool_calls=[_tc("c1", "update_work_item", {"id": 999, "tags": "new"})]),
+        _mk_response(content="Item 999 doesn't exist — let me check the list."),
+    ])
+    sent = []
+
+    async def fake_invoke(endpoint, messages, tools):
+        sent.append(list(messages))
+        return next(responses)
+
+    monkeypatch.setattr(copilot, "_invoke", fake_invoke)
+    monkeypatch.setattr(copilot, "ADOClient", _FakeADO)
+
+    out = await copilot.chat("home", "tag item 999")
+    assert out["proposals"] == []  # rejected, never surfaced to the user
+    assert "does not exist" in sent[1][-1]["content"]
+    assert "Do not guess IDs" in sent[1][-1]["content"]
+
+
+@pytest.mark.asyncio
+async def test_update_proposal_against_real_item_passes_verification(monkeypatch):
+    responses = iter([
+        _mk_response(tool_calls=[_tc("c1", "update_work_item", {"id": 4, "tags": "new"})]),
+        _mk_response(content="Proposed."),
+    ])
+
+    async def fake_invoke(endpoint, messages, tools):
+        return next(responses)
+
+    monkeypatch.setattr(copilot, "_invoke", fake_invoke)
+    monkeypatch.setattr(copilot, "ADOClient", _FakeADO)
+
+    out = await copilot.chat("home", "tag item 4")
+    assert out["proposals"] == [{"id": "p1", "tool": "update_work_item", "args": {"id": 4, "tags": "new"}}]
+
+
+@pytest.mark.asyncio
+async def test_create_proposal_skips_verification(monkeypatch):
+    """create_work_item has no target id — must not touch ADO at all."""
+    responses = iter([
+        _mk_response(tool_calls=[_tc("c1", "create_work_item", {"type": "Task", "title": "New"})]),
+        _mk_response(content="Proposed."),
+    ])
+
+    async def fake_invoke(endpoint, messages, tools):
+        return next(responses)
+
+    class ExplodingADO:
+        def __init__(self, *a, **k):
+            raise AssertionError("ADO must not be constructed for create proposals")
+
+    monkeypatch.setattr(copilot, "_invoke", fake_invoke)
+    monkeypatch.setattr(copilot, "ADOClient", ExplodingADO)
+
+    out = await copilot.chat("home", "make a task")
+    assert len(out["proposals"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_genie_history_tool(monkeypatch):
+    """query_analytics_history routes through genie.ask and truncates rows."""
+    async def fake_ask(question, conversation_id=None):
+        assert question == "open items trend"
+        return {"text": ["Trend is flat."], "queryDescription": "desc",
+                "columns": ["d", "n"], "rows": [["2026-07-01", "1"]] * 80}
+
+    monkeypatch.setattr("app.copilot.genie.ask", fake_ask)
+    out = await copilot._run_read_tool("query_analytics_history", {"question": "open items trend"}, "home")
+    assert out["text"] == "Trend is flat."
+    assert len(out["rows"]) == 50
+    assert "not real-time" in out["note"]
+
+
+@pytest.mark.asyncio
+async def test_genie_history_tool_unconfigured(monkeypatch):
+    from app import genie as genie_mod
+
+    async def fake_ask(question, conversation_id=None):
+        raise genie_mod.GenieNotConfigured("no space set")
+
+    monkeypatch.setattr("app.copilot.genie.ask", fake_ask)
+    out = await copilot._run_read_tool("query_analytics_history", {"question": "x"}, "home")
+    assert out == {"error": "no space set"}
+
+
+def test_parse_text_tool_calls():
+    """The llama text-form call + 'assistant' artifact gets lifted and stripped."""
+    text = 'update_work_item(id=2, tags="triage")assistant\n\nProposed updates to both items.'
+    cleaned, calls = copilot._parse_text_tool_calls(text)
+    assert cleaned == "Proposed updates to both items."
+    assert len(calls) == 1
+    assert calls[0]["function"]["name"] == "update_work_item"
+    assert json.loads(calls[0]["function"]["arguments"]) == {"id": 2, "tags": "triage"}
+
+
+def test_parse_text_tool_calls_leaves_prose_alone():
+    text = "You should update work item 4 (it needs tags)."
+    cleaned, calls = copilot._parse_text_tool_calls(text)
+    assert cleaned == text and calls == []
+
+
+@pytest.mark.asyncio
+async def test_text_form_call_becomes_proposal(monkeypatch):
+    """A message with no structured tool_calls but a text-form write call still
+    yields a proposal, and the loop continues to a real final answer."""
+    responses = iter([
+        _mk_response(content='update_work_item(id=4, tags="triage")assistant\n\nDone.'),
+        _mk_response(content="Proposed the tag update; awaiting your approval."),
+    ])
+
+    async def fake_invoke(endpoint, messages, tools):
+        return next(responses)
+
+    monkeypatch.setattr(copilot, "_invoke", fake_invoke)
+    monkeypatch.setattr(copilot, "ADOClient", _FakeADO)
+
+    out = await copilot.chat("home", "tag item 4")
+    assert out["proposals"] == [{"id": "p1", "tool": "update_work_item", "args": {"id": 4, "tags": "triage"}}]
+    assert out["reply"] == "Proposed the tag update; awaiting your approval."
 
 
 @pytest.mark.asyncio

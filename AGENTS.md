@@ -184,7 +184,10 @@ gracefully (they hide) unless the **app's service principal** gets:
 
 ### G7. Verify
 - `GET <app-url>/api/health` → `"genie_configured": true`
-- Analytics tab → ask "How many open work items are there by state?" → answer + table.
+- AI Copilot tab → ask a historical question ("How did open items trend this month?")
+  → the trace/tool chips show `query_analytics_history` and the answer cites batch data.
+  (The Genie chat UI was folded into the copilot on 2026-07-02; there is no separate
+  Genie chat on the Analytics tab anymore. The `/api/genie/ask` endpoint still works.)
 - Direct API check: `w.genie.start_conversation_and_wait(space_id, question)` should return
   `COMPLETED` with a text/query attachment.
 - `GET <app-url>/api/analytics/freshness` → `{"available": true, "asOf": "<date>"}` (after G6).
@@ -228,11 +231,27 @@ the REST routes use. Genie remains the batch/historical analytics surface.
   logging, permissions, and code paths are byte-identical to a human click. Keep this
   invariant when adding tools: new write capabilities = new proposal types + an Apply
   mapping in the UI, never direct execution in the loop.
+- **Write proposals are verified before they surface.** `update_work_item` /
+  `add_work_item_comment` proposals trigger a server-side `get_work_item` on the target
+  id; a 404 rejects the proposal and the error is fed back to the model mid-loop so it
+  self-corrects (models guess sequential IDs — a deleted probe item once caused exactly
+  this). Rejections appear in the trace as `verify:{tool}` spans. Keep this check when
+  adding write tools that reference existing entities.
+- **Apply outcomes round-trip.** The UI appends a `[Proposal outcomes: …]` note
+  (applied / dismissed / failed: <error> / not applied yet) to each assistant turn in
+  the history it sends, and the system prompt tells the model to read it — so "try
+  again" and "do the rest" work, and nothing already applied is re-proposed. Preserve
+  this note format if you rework the frontend.
 - **Wire protocol** is OpenAI-style chat completions with `tools`, POSTed to
   `{workspace}/serving-endpoints/{name}/invocations`. Auth: `WorkspaceClient().config
   .authenticate()` gives refreshed bearer headers for both SP (in-app) and PAT (dev).
 - **Reasoning models** (e.g. gpt-oss) return `content` as a list of typed blocks, not a
   string — extract only `{"type": "text"}` blocks (`_content_text` in copilot.py).
+- **Llama-family models sometimes emit tool calls as plain text** — e.g.
+  `update_work_item(id=2, tags="triage")` plus a stray `assistant` template token —
+  typically for the 2nd+ call of a multi-item request. The loop lifts these into real
+  tool calls via `_parse_text_tool_calls` (regex fallback) so proposals aren't silently
+  lost. Keep this fallback when changing the loop; prompt rules alone do not fix it.
 - **Loop bounds**: MAX_TURNS=8 model calls per user message; tool results truncated to
   6000 chars before being fed back.
 - **Endpoint + experiment are per-workspace config** read at runtime (no redeploy):
@@ -242,6 +261,9 @@ the REST routes use. Genie remains the batch/historical analytics surface.
   with child `llm` spans (per model call: message count, finish_reason, token usage) and
   `tool:{name}` spans (args in, truncated result out). Any tracing failure downgrades to
   no-op — a chat turn must never break because tracing is misconfigured.
+- **Genie is a copilot tool**: `query_analytics_history` calls the Genie space for
+  BI/historical questions (batch Delta data). The system prompt requires the model to
+  distinguish live tools from this batch tool and say which one an answer came from.
 - Where things live: `src/app/copilot.py` (loop, tool registry, tracing),
   `/api/copilot/chat` in `src/app/api/routes.py`, audit action `copilot.chat` in
   `src/app/main.py`, UI `frontend/src/screens/Copilot.tsx` (proposal cards + Apply).

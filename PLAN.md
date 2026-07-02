@@ -127,7 +127,9 @@ through the trunk (GitHub → mirror → ADO PR → pipeline).
   search (assignee picker), comments list, area/iteration paths.
 
 **4C — Analytics tab → Reports.**
-- The Genie chat moves out (→ 4D). Analytics becomes report widgets: state distribution,
+- ~~The Genie chat moves out~~ *Done 2026-07-02: the Genie chat was removed from
+  Analytics and became the copilot's `query_analytics_history` tool (Jason's call —
+  one chat surface).* Analytics becomes report widgets: state distribution,
   created vs completed, throughput/week, cycle time, per-assignee workload — each driven
   by OData `$apply` with shared **filters: assignee(s), work-item type, date range**
   (the existing 24h/7d/30d control generalizes to a date-range picker).
@@ -147,8 +149,8 @@ live operational plane:
   "AI Copilot activation".
 - Later cuts: per-user session history in the app-state store; PR-review tools (needs
   4F's file/diff endpoints); artifact generation (PDF/Excel downloads); gated
-  table-edit tools. Genie stays on the Analytics tab for historical questions and may
-  later become one copilot tool among many.
+  table-edit tools. Genie is already one copilot tool among many
+  (`query_analytics_history`, since 2026-07-02).
 
 **4E — Report builder.**
 - Visual query builder over the OData analytics surface: entity (work items /

@@ -32,16 +32,26 @@ const SUGGESTIONS = [
 export default function Copilot({ project }: { project: string }) {
   const health = useQuery({ queryKey: ["health"], queryFn: fetchHealth });
   const [turns, setTurns] = useState<Turn[]>([]);
+  // Proposal outcomes ("applied" | "dismissed" | "failed: …"), keyed turnIdx:proposalId.
+  // Fed back into the next turn's history so the model knows what actually happened.
+  const [outcomes, setOutcomes] = useState<Record<string, string>>({});
   const [question, setQuestion] = useState("");
   const endRef = useRef<HTMLDivElement>(null);
 
+  const outcomeNote = (t: Turn, i: number) => {
+    const ps = t.answer?.proposals ?? [];
+    if (ps.length === 0) return "";
+    const parts = ps.map((p) => `${proposalTitle(p)} → ${outcomes[`${i}:${p.id}`] ?? "not applied yet"}`);
+    return `\n\n[Proposal outcomes: ${parts.join("; ")}]`;
+  };
+
   const mut = useMutation({
     mutationFn: (q: string) => {
-      const history = turns.flatMap((t) =>
+      const history = turns.flatMap((t, i) =>
         t.answer
           ? [
               { role: "user" as const, content: t.question },
-              { role: "assistant" as const, content: t.answer.reply },
+              { role: "assistant" as const, content: t.answer.reply + outcomeNote(t, i) },
             ]
           : [],
       );
@@ -87,7 +97,15 @@ export default function Copilot({ project }: { project: string }) {
 
       <div className="mt-5 space-y-5">
         {turns.map((t, i) => (
-          <TurnView key={i} turn={t} project={project} pending={mut.isPending && i === turns.length - 1} />
+          <TurnView
+            key={i}
+            turn={t}
+            project={project}
+            pending={mut.isPending && i === turns.length - 1}
+            outcomes={outcomes}
+            turnIndex={i}
+            onOutcome={(pid, v) => setOutcomes((o) => ({ ...o, [`${i}:${pid}`]: v }))}
+          />
         ))}
         <div ref={endRef} />
       </div>
@@ -133,7 +151,21 @@ function NotConfigured() {
   );
 }
 
-function TurnView({ turn, project, pending }: { turn: Turn; project: string; pending: boolean }) {
+function TurnView({
+  turn,
+  project,
+  pending,
+  outcomes,
+  turnIndex,
+  onOutcome,
+}: {
+  turn: Turn;
+  project: string;
+  pending: boolean;
+  outcomes: Record<string, string>;
+  turnIndex: number;
+  onOutcome: (pid: string, v: string) => void;
+}) {
   return (
     <div>
       <div className="flex justify-end">
@@ -144,13 +176,33 @@ function TurnView({ turn, project, pending }: { turn: Turn; project: string; pen
       <div className="mt-3">
         {pending && <p className="m-0 animate-pulse text-[12.5px] text-faint">Working — reading your project…</p>}
         {turn.error && <p className="m-0 text-[12.5px] text-danger">{turn.error}</p>}
-        {turn.answer && <AnswerView a={turn.answer} project={project} />}
+        {turn.answer && (
+          <AnswerView
+            a={turn.answer}
+            project={project}
+            outcomes={outcomes}
+            turnIndex={turnIndex}
+            onOutcome={onOutcome}
+          />
+        )}
       </div>
     </div>
   );
 }
 
-function AnswerView({ a, project }: { a: CopilotReply; project: string }) {
+function AnswerView({
+  a,
+  project,
+  outcomes,
+  turnIndex,
+  onOutcome,
+}: {
+  a: CopilotReply;
+  project: string;
+  outcomes: Record<string, string>;
+  turnIndex: number;
+  onOutcome: (pid: string, v: string) => void;
+}) {
   return (
     <Card className="space-y-3 p-[14px_16px]">
       {a.toolCalls.length > 0 && (
@@ -164,7 +216,13 @@ function AnswerView({ a, project }: { a: CopilotReply; project: string }) {
       )}
       <p className="m-0 whitespace-pre-wrap text-[13px] text-text">{a.reply}</p>
       {a.proposals.map((p) => (
-        <ProposalCard key={p.id} p={p} project={project} />
+        <ProposalCard
+          key={p.id}
+          p={p}
+          project={project}
+          outcome={outcomes[`${turnIndex}:${p.id}`]}
+          onOutcome={(v) => onOutcome(p.id, v)}
+        />
       ))}
     </Card>
   );
@@ -189,12 +247,21 @@ function proposalTitle(p: CopilotProposal): string {
   return p.tool;
 }
 
-type ProposalStatus = "pending" | "applied" | "dismissed";
-
-function ProposalCard({ p, project }: { p: CopilotProposal; project: string }) {
+function ProposalCard({
+  p,
+  project,
+  outcome,
+  onOutcome,
+}: {
+  p: CopilotProposal;
+  project: string;
+  outcome?: string;
+  onOutcome: (v: string) => void;
+}) {
   const qc = useQueryClient();
   const toast = useToast();
-  const [status, setStatus] = useState<ProposalStatus>("pending");
+  // "failed: …" keeps the buttons so the user can retry.
+  const status = outcome === "applied" ? "applied" : outcome === "dismissed" ? "dismissed" : "pending";
 
   const apply = useMutation({
     mutationFn: async () => {
@@ -226,11 +293,12 @@ function ProposalCard({ p, project }: { p: CopilotProposal; project: string }) {
       throw new Error(`Unknown proposal type: ${p.tool}`);
     },
     onSuccess: (d: unknown) => {
-      setStatus("applied");
+      onOutcome("applied");
       qc.invalidateQueries({ queryKey: ["workitems", project] });
       const created = d as { id?: number };
       toast(p.tool === "create_work_item" && created?.id ? `#${created.id} created` : "Applied");
     },
+    onError: (e) => onOutcome(`failed: ${(e as Error).message}`),
   });
 
   const rows = Object.entries(p.args).filter(([k]) => k !== "id" || p.tool === "update_work_item");
@@ -267,7 +335,7 @@ function ProposalCard({ p, project }: { p: CopilotProposal; project: string }) {
             {apply.isPending ? "Applying…" : "Apply"}
           </button>
           <button
-            onClick={() => setStatus("dismissed")}
+            onClick={() => onOutcome("dismissed")}
             className="rounded-[7px] border border-border bg-surface px-[12px] py-[6px] text-[12px] font-medium text-text-3 hover:bg-hover"
           >
             Dismiss

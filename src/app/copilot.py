@@ -15,12 +15,14 @@ Design contract (see PLAN.md §5a 4D):
 import base64
 import json
 import logging
+import re
 from contextlib import nullcontext
 from functools import lru_cache
 from typing import Any
 
 import httpx
 
+from app import genie
 from app.ado.analytics import AnalyticsClient, OPEN_CATEGORIES
 from app.ado.client import ADOClient
 from app.config import settings
@@ -180,6 +182,15 @@ READ_TOOLS: list[dict[str, Any]] = [
         {},
         [],
     ),
+    _schema(
+        "query_analytics_history",
+        "Ask Databricks Genie a natural-language BI question over the INGESTED analytics "
+        "tables (Delta, refreshed daily — NOT real-time). Use for trends, history, and "
+        "aggregations over time; use the other tools for current/live state. Returns "
+        "text plus a result table when the question is tabular.",
+        {"question": {"type": "string", "description": "A self-contained analytics question."}},
+        ["question"],
+    ),
 ]
 
 WRITE_TOOLS: list[dict[str, Any]] = [
@@ -209,6 +220,26 @@ ALL_TOOLS = READ_TOOLS + WRITE_TOOLS
 
 
 async def _run_read_tool(name: str, args: dict[str, Any], project: str) -> Any:
+    if name == "get_analytics_summary":
+        a = AnalyticsClient()
+        by_cat = await a.count_by_state_category(project)
+        return {
+            "byCategory": by_cat,
+            "open": sum(v for k, v in by_cat.items() if k in OPEN_CATEGORIES),
+            "total": sum(by_cat.values()),
+        }
+    if name == "query_analytics_history":
+        try:
+            ans = await genie.ask(str(args["question"]))
+        except genie.GenieNotConfigured as e:
+            return {"error": str(e)}
+        return {
+            "text": " ".join(ans.get("text") or []),
+            "queryDescription": ans.get("queryDescription"),
+            "columns": ans.get("columns") or [],
+            "rows": (ans.get("rows") or [])[:50],
+            "note": "Data is batch (refreshed daily / on demand), not real-time.",
+        }
     c = ADOClient()
     if name == "list_work_items":
         return await c.list_work_items(project, top=min(int(args.get("top") or 50), 200))
@@ -222,14 +253,6 @@ async def _run_read_tool(name: str, args: dict[str, Any], project: str) -> Any:
         return await c.list_pull_requests(project, status=args.get("status") or "active")
     if name == "list_builds":
         return await c.list_builds(project, top=min(int(args.get("top") or 25), 100))
-    if name == "get_analytics_summary":
-        a = AnalyticsClient()
-        by_cat = await a.count_by_state_category(project)
-        return {
-            "byCategory": by_cat,
-            "open": sum(v for k, v in by_cat.items() if k in OPEN_CATEGORIES),
-            "total": sum(by_cat.values()),
-        }
     raise ValueError(f"unknown read tool: {name}")
 
 
@@ -244,9 +267,42 @@ Rules:
   PROPOSALS: they are recorded and shown to the user with an Apply button — they
   do not run when you call them. Propose confidently when asked to make changes,
   then briefly summarize what you proposed and note it awaits the user's approval.
+- NEVER guess work item IDs. Only use IDs you have seen in a read tool result in
+  this conversation; when unsure, call list_work_items first. Proposals against
+  nonexistent items are rejected.
+- When a request affects several items, make a write tool call for EACH item — one
+  proposal per item. Tool calls must go through the tool-calling mechanism ONLY;
+  never write a tool call as text in your answer. If you have more calls to make,
+  keep making them — you are re-prompted after each batch of results — and give the
+  plain-language summary only once everything is proposed.
+- Prior assistant turns may end with a "[Proposal outcomes: ...]" note recording
+  what the user applied or dismissed and what failed — use it to decide next steps
+  and never re-propose something already applied.
 - Before assigning anyone, resolve their email with search_identities.
+- Two data planes: read tools are LIVE; query_analytics_history is BATCH (Delta,
+  refreshed daily). Use it for trends/history and say so when you do — never present
+  batch numbers as real-time.
 - Be concise. Answer in plain sentences; no markdown headers.
 """
+
+
+async def _verify_write_target(name: str, args: dict[str, Any], project: str) -> str | None:
+    """Reject proposals that target a work item that doesn't exist (models
+    sometimes assume sequential IDs). Returns an error string, or None if OK."""
+    if name not in ("update_work_item", "add_work_item_comment") or args.get("id") is None:
+        return None
+    try:
+        await ADOClient().get_work_item(int(args["id"]))
+        return None
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 404:
+            return (
+                f"Work item {args['id']} does not exist. Do not guess IDs — call "
+                "list_work_items or get_work_item to find the real ones, then re-propose."
+            )
+        return f"Could not verify work item {args['id']}: ADO returned {e.response.status_code}"
+    except Exception as e:
+        return f"Could not verify work item {args['id']}: {e}"
 
 
 async def _invoke(endpoint: str, messages: list[dict], tools: list[dict]) -> dict[str, Any]:
@@ -269,6 +325,43 @@ def _content_text(content: Any) -> str:
     if isinstance(content, list):
         return "".join(b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text")
     return ""
+
+
+_TOOL_NAME_ALT = "|".join(sorted(t["function"]["name"] for t in ALL_TOOLS))
+_TEXT_CALL_RE = re.compile(rf"\b({_TOOL_NAME_ALT})\s*\(([^()]*)\)")
+_ARG_RE = re.compile(r"""(\w+)\s*=\s*("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|[^,()]+)""")
+
+
+def _parse_text_tool_calls(text: str) -> tuple[str, list[dict[str, Any]]]:
+    """Llama-family models sometimes emit a tool call as plain text — e.g.
+    `update_work_item(id=2, tags="triage")` — instead of a structured tool_call
+    (typically the 2nd+ call in a multi-item request). Lift those into real tool
+    calls so proposals aren't silently lost, and strip them (plus the stray
+    'assistant' template token) from the visible text."""
+    calls: list[dict[str, Any]] = []
+
+    def lift(m: re.Match) -> str:
+        args: dict[str, Any] = {}
+        for am in _ARG_RE.finditer(m.group(2)):
+            k, v = am.group(1), am.group(2).strip()
+            if v[:1] in "\"'" and v[-1:] == v[:1]:
+                v = v[1:-1]
+            else:
+                try:
+                    v = int(v)
+                except ValueError:
+                    pass
+            args[k] = v
+        calls.append({
+            "id": f"textcall{len(calls)}",
+            "type": "function",
+            "function": {"name": m.group(1), "arguments": json.dumps(args)},
+        })
+        return ""
+
+    cleaned = _TEXT_CALL_RE.sub(lift, text)
+    cleaned = re.sub(r"(^|\n)\s*assistant\s*(\n|$)", r"\1", cleaned).strip()
+    return cleaned, calls
 
 
 async def chat(project: str, message: str, history: list[dict[str, str]] | None = None) -> dict[str, Any]:
@@ -302,14 +395,20 @@ async def chat(project: str, message: str, history: list[dict[str, str]] | None 
                     llm.set_outputs({"finish_reason": choice.get("finish_reason"),
                                      "usage": data.get("usage")})
 
-            tcs = msg.get("tool_calls") or []
+            tcs = list(msg.get("tool_calls") or [])
             text = _content_text(msg.get("content"))
-            # Echo the assistant message back verbatim so the endpoint sees its own turn.
-            messages.append({"role": "assistant", "content": msg.get("content") or "",
-                             **({"tool_calls": tcs} if tcs else {})})
+            cleaned, lifted = _parse_text_tool_calls(text) if text else (text, [])
+            tcs += lifted
+            # Echo the assistant message back so the endpoint sees its own turn —
+            # with any text-form calls moved into structured tool_calls.
+            messages.append({
+                "role": "assistant",
+                "content": cleaned if lifted else (msg.get("content") or ""),
+                **({"tool_calls": tcs} if tcs else {}),
+            })
 
             if not tcs:
-                reply = text
+                reply = cleaned
                 break
 
             for tc in tcs:
@@ -321,13 +420,21 @@ async def chat(project: str, message: str, history: list[dict[str, str]] | None 
                     args = {}
 
                 if name in WRITE_TOOL_NAMES:
-                    pid = f"p{len(proposals) + 1}"
-                    proposals.append({"id": pid, "tool": name, "args": args})
-                    result: Any = {
-                        "proposed": True,
-                        "proposalId": pid,
-                        "note": "Recorded. The user will review and apply this change.",
-                    }
+                    with _span(f"verify:{name}") as vs:
+                        problem = await _verify_write_target(name, args, project)
+                        if vs:
+                            vs.set_inputs({"id": args.get("id")})
+                            vs.set_outputs({"rejected": problem})
+                    if problem:
+                        result: Any = {"error": problem}
+                    else:
+                        pid = f"p{len(proposals) + 1}"
+                        proposals.append({"id": pid, "tool": name, "args": args})
+                        result = {
+                            "proposed": True,
+                            "proposalId": pid,
+                            "note": "Recorded. The user will review and apply this change.",
+                        }
                 else:
                     with _span(f"tool:{name}") as ts:
                         if ts:
