@@ -217,7 +217,12 @@ missing; scheduled ingest fails at startup → G0 missing; freshness bar hidden 
 7. **Secret values, RBAC grants, PR merges, and Genie Space sharing are HUMAN actions.**
    Sandboxed agents are (correctly) blocked from them; design flows so these are few,
    explicit, and listed for the human rather than attempted.
-8. **The two data planes drift.** CRUD tabs are live (ADO REST), the Overview is
+8. **Bundle-deployed resources can lock their UI.** Jobs/apps deployed by a bundle are
+   marked as bundle-managed and the workspace UI may refuse edits (including the
+   permissions dialog). Use the Permissions REST API / SDK instead — e.g. from a notebook:
+   `w.api_client.do("PATCH", "/api/2.0/permissions/jobs/<id>", body={"access_control_list":
+   [{"service_principal_name": "<app-sp-client-id>", "permission_level": "CAN_MANAGE_RUN"}]})`.
+9. **The two data planes drift.** CRUD tabs are live (ADO REST), the Overview is
    near-live (ADO Analytics OData), Genie is batch (Delta, refreshed by the ingest
    schedule or the Refresh button). Surface freshness in the UI; never imply Genie
    answers are real-time.
