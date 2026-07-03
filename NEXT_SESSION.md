@@ -159,10 +159,14 @@ API reads, Genie space creation) is allowed.
    Remaining: PDF (weasyprint needs system cairo/pango — VERIFY the Apps runtime
    before adding the dependency; a broken pip install blocks deploys) and
    copilot-artifact exports (e.g. Genie result → xlsx).
-4. Small: ~~row-click chevrons~~ (shipped 2026-07-03) · ~~route tests~~ (shipped;
-   CI coverage gate still optional); model eval harness before swapping
-   `copilot_endpoint` to `databricks-claude-sonnet-5` in corporate;
-   builder filter UI (backend already accepts parameterized filters).
+4. Small: ~~row-click chevrons~~ · ~~route tests~~ · ~~builder filter UI~~ ·
+   ~~PDF export~~ (fpdf2) · ~~copilot table artifacts~~ · ~~model eval harness~~
+   — ALL SHIPPED 2026-07-03. Eval harness: `scripts/eval_copilot.py` +
+   `evals/copilot_tasks.json`, mlflow.genai.evaluate + judges, experiment
+   `/Shared/ado-companion-evals` (id 1855387441328379), llama baseline logged
+   (all scorers 1.0, latency mean ~7s). See AGENTS "Model eval harness".
+   Remaining small: CI coverage gate (optional); grow the eval suite; corporate
+   run vs `databricks-claude-sonnet-5` with a pinned judge.
 
 **Blog**: Parts 1–6 drafted in `docs/blog/`, all `draft: true`, screenshot slots
 marked (1 build+CI/CD · 2 OData · 3 copilot · 4 MLflow tracing · 5 in-place AI ·

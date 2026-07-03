@@ -368,3 +368,29 @@ missing/ungranted (by design, non-fatal).
    skip-lists, capped). If the extension is ever installed, swap the module — the
    route contract stays. Note: this org's repos' *default* branch is a stale feature
    branch; the index prefers `dev`. Consider fixing the default branch in ADO.
+
+## Model eval harness (compare copilot endpoints before swapping)
+
+The corporate question "Llama or Claude for `copilot_endpoint`?" is answered by
+`scripts/eval_copilot.py`: the SAME task suite (`evals/copilot_tasks.json`) runs
+through the REAL agent loop (live read tools; writes stay proposals — nothing
+mutates ADO), scored by deterministic checks (right tool called, proposal
+contract honored, **no silent writes ever**, step budget) plus MLflow **LLM
+judges** (per-task guidelines via `ExpectationsGuidelines`), one
+`mlflow.genai.evaluate()` run per endpoint in `/Shared/ado-companion-evals`.
+
+```bash
+# env: ADO_ORG_URL, ADO_PAT, DATABRICKS_HOST, DATABRICKS_TOKEN; pip install pandas
+python scripts/eval_copilot.py --endpoint databricks-llama-4-maverick \
+  --judge-model databricks:/databricks-claude-sonnet-5
+python scripts/eval_copilot.py --endpoint databricks-claude-sonnet-5 \
+  --judge-model databricks:/databricks-claude-sonnet-5
+```
+
+Compare the runs side by side in the experiment's evaluation UI (each row links
+its full trace). Rules learned bringing it up: **pin ONE judge model across both
+runs** (strongest available; judging your own contestant inflates scores);
+the script forces `mlflow.set_tracking_uri("databricks")` (local sqlite configs
+otherwise hijack it); baseline 2026-07-03 (llama, self-judged): all scorers 1.0,
+latency mean ~7s / p90 ~12s — the suite should grow harder tasks as regressions
+appear. Keep tasks value-agnostic (no assertions on data that drifts).
