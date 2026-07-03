@@ -313,21 +313,7 @@ function AnswerView({
 }) {
   return (
     <Card className="space-y-3 p-[14px_16px]">
-      {a.toolCalls.length > 0 && (
-        <div className="flex flex-wrap gap-[5px]">
-          {a.toolCalls.map((t, i) => (
-            <span
-              key={i}
-              className={`rounded-[5px] px-[7px] py-[2px] font-mono text-[10.5px] ${
-                t.error ? "bg-danger-bg text-danger" : "bg-nbg text-nfg"
-              }`}
-              title={t.error ? `FAILED — ${JSON.stringify(t.args)}` : JSON.stringify(t.args)}
-            >
-              {t.error ? "failed" : "read"}: {t.name}
-            </span>
-          ))}
-        </div>
-      )}
+      <WorkingTimeline a={a} />
       <p className="m-0 whitespace-pre-wrap text-[13px] text-text">{a.reply}</p>
       {(a.tables ?? []).length > 0 && (
         <div className="flex flex-wrap gap-[6px]">
@@ -353,6 +339,64 @@ function AnswerView({
         />
       ))}
     </Card>
+  );
+}
+
+/** How the agent got there: collapsed = the familiar tool chips; expanded = the
+ * full interleaved timeline of its thinking and every tool call with args and a
+ * result preview. Failures are red in both views — nothing is invisible. */
+function WorkingTimeline({ a }: { a: CopilotReply }) {
+  const [open, setOpen] = useState(false);
+  const steps = a.steps ?? [];
+  if (!a.toolCalls.length && !steps.length) return null;
+
+  return (
+    <div>
+      <div className="flex flex-wrap items-center gap-[5px]">
+        {a.toolCalls.map((t, i) => (
+          <span
+            key={i}
+            className={`rounded-[5px] px-[7px] py-[2px] font-mono text-[10.5px] ${
+              t.error ? "bg-danger-bg text-danger" : "bg-nbg text-nfg"
+            }`}
+            title={t.error ? `FAILED — ${JSON.stringify(t.args)}` : JSON.stringify(t.args)}
+          >
+            {t.error ? "failed" : "read"}: {t.name}
+          </span>
+        ))}
+        {steps.length > 0 && (
+          <button
+            onClick={() => setOpen((o) => !o)}
+            className="rounded-[5px] px-[7px] py-[2px] text-[10.5px] font-medium text-faint hover:text-text-3"
+          >
+            {open ? "hide working ▴" : `show working (${steps.length} steps) ▾`}
+          </button>
+        )}
+      </div>
+      {open && (
+        <div className="mt-[8px] border-l-2 border-line pl-[10px]">
+          {steps.map((s, i) =>
+            s.type === "thinking" ? (
+              <p key={i} className="m-0 py-[4px] text-[11.5px] italic text-muted">
+                {s.text}
+              </p>
+            ) : (
+              <div key={i} className="py-[4px]">
+                <div className={`font-mono text-[11px] ${s.error ? "text-danger" : "text-text-2"}`}>
+                  {s.error ? "✕" : "→"} {s.name}
+                  <span className="text-faint"> {s.args}</span>
+                </div>
+                {s.result && (
+                  <div className={`truncate font-mono text-[10.5px] ${s.error ? "text-danger" : "text-faint"}`}>
+                    ⟵ {s.result}
+                  </div>
+                )}
+              </div>
+            ),
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 

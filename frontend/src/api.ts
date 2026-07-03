@@ -31,11 +31,21 @@ export interface CopilotTable {
   rows: (string | number | null)[][];
 }
 
+export interface CopilotStep {
+  type: "thinking" | "tool";
+  text?: string; // thinking
+  name?: string; // tool
+  args?: string;
+  result?: string;
+  error?: boolean;
+}
+
 export interface CopilotReply {
   reply: string;
   toolCalls: CopilotToolCall[];
   proposals: CopilotProposal[];
   tables?: CopilotTable[];
+  steps?: CopilotStep[];
   endpoint: string;
 }
 

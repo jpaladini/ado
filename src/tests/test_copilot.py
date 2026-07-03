@@ -620,3 +620,34 @@ async def test_malformed_tool_json_gets_precise_feedback(monkeypatch):
     assert out["toolCalls"] == [{"name": "create_code_pr", "args": {}, "error": True}]
     feedback = sent[1][-1]["content"]
     assert "NOT valid JSON" in feedback and "escape newlines" in feedback
+
+
+@pytest.mark.asyncio
+async def test_steps_timeline_interleaves_thinking_and_tools(monkeypatch):
+    responses = iter([
+        _mk_response(content="Let me look at the items first.",
+                     tool_calls=[_tc("c1", "list_work_items", {"top": 5})]),
+        _mk_response(content="All done."),
+    ])
+
+    async def fake_invoke(endpoint, messages, tools):
+        return next(responses)
+
+    async def fake_read(name, args, project):
+        return [{"id": 1}]
+
+    monkeypatch.setattr(copilot, "_invoke", fake_invoke)
+    monkeypatch.setattr(copilot, "_run_read_tool", fake_read)
+    out = await copilot.chat("home", "what's open?")
+    kinds = [(s["type"], s.get("name")) for s in out["steps"]]
+    assert kinds == [("thinking", None), ("tool", "list_work_items")]
+    assert out["steps"][0]["text"] == "Let me look at the items first."
+    assert "1 rows" in out["steps"][1]["result"]
+
+
+def test_compact_args_never_inlines_file_content():
+    s = copilot._compact_args("create_code_pr", {
+        "repositoryId": "r1", "baseBranch": "main", "title": "t",
+        "edits": [{"path": "/a.py", "content": "x" * 50_000}],
+    })
+    assert "/a.py" in s and "xxx" not in s and len(s) <= 220

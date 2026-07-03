@@ -378,6 +378,23 @@ def _window_file(f: dict[str, Any], start: int | None, end: int | None) -> dict[
     }
 
 
+def _compact_args(name: str, args: dict[str, Any]) -> str:
+    """Args as a short human-readable summary — file contents never inline."""
+    if name == "create_code_pr":
+        paths = [str(e.get("path")) for e in (args.get("edits") or []) if isinstance(e, dict)]
+        show = {k: v for k, v in args.items() if k in ("repositoryId", "baseBranch", "title")}
+        show["files"] = paths
+        return json.dumps(show)[:220]
+    return json.dumps(args, default=str)[:220]
+
+
+def _result_preview(result: Any) -> str:
+    """A one-line taste of a tool result — enough to follow the plot."""
+    if isinstance(result, list):
+        return f"{len(result)} rows: " + json.dumps(result[:2], default=str)
+    return json.dumps(result, default=str)
+
+
 async def _run_read_tool(name: str, args: dict[str, Any], project: str) -> Any:
     if name == "get_analytics_summary":
         a = AnalyticsClient()
@@ -686,6 +703,7 @@ async def chat(project: str, message: str, history: list[dict[str, str]] | None 
     tool_calls_made: list[dict[str, Any]] = []
     proposals: list[dict[str, Any]] = []
     tables: list[dict[str, Any]] = []  # Genie result tables → downloadable artifacts
+    steps: list[dict[str, Any]] = []  # the working timeline: thinking + tool rounds
     reply = ""
 
     with _span("copilot.turn", endpoint=endpoint, project=project) as turn:
@@ -718,6 +736,11 @@ async def chat(project: str, message: str, history: list[dict[str, str]] | None 
                 reply = cleaned
                 break
 
+            # The model's between-rounds narration IS its reasoning — surface it
+            # in the working timeline instead of discarding it.
+            if cleaned and cleaned.strip():
+                steps.append({"type": "thinking", "text": cleaned.strip()[:600]})
+
             for tc in tcs:
                 fn = tc.get("function") or {}
                 name = fn.get("name") or ""
@@ -743,6 +766,8 @@ async def chat(project: str, message: str, history: list[dict[str, str]] | None 
                         }),
                     })
                     tool_calls_made.append({"name": name, "args": {}, "error": True})
+                    steps.append({"type": "tool", "name": name, "args": "(malformed JSON)",
+                                  "result": "dropped — arguments were not valid JSON", "error": True})
                     continue
 
                 if name in WRITE_TOOL_NAMES:
@@ -753,6 +778,8 @@ async def chat(project: str, message: str, history: list[dict[str, str]] | None 
                             vs.set_outputs({"rejected": problem})
                     if problem:
                         result: Any = {"error": problem}
+                        steps.append({"type": "tool", "name": name, "args": _compact_args(name, args),
+                                      "result": f"rejected: {problem}"[:300], "error": True})
                     else:
                         pid = f"p{len(proposals) + 1}"
                         proposals.append({"id": pid, "tool": name, "args": args})
@@ -761,6 +788,8 @@ async def chat(project: str, message: str, history: list[dict[str, str]] | None 
                             "proposalId": pid,
                             "note": "Recorded. The user will review and apply this change.",
                         }
+                        steps.append({"type": "tool", "name": name, "args": _compact_args(name, args),
+                                      "result": f"proposal {pid} recorded — awaiting your Apply"})
                 else:
                     with _span(f"tool:{name}") as ts:
                         if ts:
@@ -775,6 +804,11 @@ async def chat(project: str, message: str, history: list[dict[str, str]] | None 
                     tool_calls_made.append(
                         {"name": name, "args": args, **({"error": True} if failed else {})}
                     )
+                    steps.append({
+                        "type": "tool", "name": name, "args": _compact_args(name, args),
+                        "result": (str(result.get("error")) if failed else _result_preview(result))[:300],
+                        **({"error": True} if failed else {}),
+                    })
                     # Tabular Genie answers become downloadable artifacts in the UI.
                     if (
                         name == "query_analytics_history"
@@ -808,5 +842,6 @@ async def chat(project: str, message: str, history: list[dict[str, str]] | None 
         "toolCalls": tool_calls_made,
         "proposals": proposals,
         "tables": tables,
+        "steps": steps[:60],
         "endpoint": endpoint,
     }
