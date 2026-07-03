@@ -127,16 +127,21 @@ API reads, Genie space creation) is allowed.
   `PlotFigure` (re-renders on resize + theme flip).
 - **Observability**: every model call traced to experiment 3567576457281688 with token
   usage; every AI/mutating action in `workspace.ado_companion_app.audit_log`.
-- **Tests**: 69 pytest, ~72% line coverage (client 92%, ai 83%; routes 56% — offered
+- **Tests**: 88 pytest (19 new for the report builder), ~72% line coverage (client 92%, ai 83%; routes 56% — offered
   TestClient+CI-gate PR, not yet requested). Frontend has no automated tests
   (Playwright screenshots + live smokes per PR instead).
 
 **Next up (agreed order):**
-1. **4E report builder on UC metric views** — VERIFIED on Free Edition:
-   `CREATE VIEW … WITH METRICS LANGUAGE YAML` + `MEASURE()` round-trip works (probe
-   view created in workspace.default, then dropped). Design in PLAN §5a 4E: measures/
-   dimensions in UC (governed, Genie-visible), builder picks dims × measures × chart,
-   app renders with the same Plot components. Batch plane — historical only.
+1. ~~4E report builder~~ **SHIPPED 2026-07-03**: metric view
+   `workspace.ado_companion_app.work_items_metrics` (YAML in
+   `src/app/reportbuilder.py`, app-created lazily via the warehouse so the app SP
+   owns it and CREATE OR REPLACE works on version bumps); builder UI on Reports
+   (dims × measures × chart: auto/bar/line/area/table); per-user saved reports in
+   `ado_companion_app.saved_reports`; endpoints `GET /api/reports/builder/meta`,
+   `POST /api/reports/builder/run`, `GET/PUT/DELETE /api/reports/saved`; audit
+   actions `report.run/save/delete`. Lead-time measures use a SQL business-days
+   closed form (epoch-Monday method) tested equal to `business_days_between`.
+   Deferred: builder filter UI (backend already accepts parameterized filters).
 2. Copilot session history (store table `ai_sessions` was designed for it in 4A).
 3. Artifacts: PDF/Excel exports from copilot + Reports (openpyxl/weasyprint).
 4. Small: PR/work-item row-click affordance chevrons (promised, unshipped);

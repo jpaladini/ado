@@ -27,6 +27,9 @@ _ACTIONS = [
     (re.compile(r"^/api/ai/review-pr$"), "POST", "ai.review"),
     (re.compile(r"^/api/ai/explain-file$"), "POST", "ai.explain"),
     (re.compile(r"^/api/analytics/refresh$"), "POST", "analytics.refresh"),
+    (re.compile(r"^/api/reports/builder/run$"), "POST", "report.run"),
+    (re.compile(r"^/api/reports/saved$"), "PUT", "report.save"),
+    (re.compile(r"^/api/reports/saved/[^/]+$"), "DELETE", "report.delete"),
     (re.compile(r"^/api/settings$"), "PUT", "settings.update"),
 ]
 

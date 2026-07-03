@@ -86,6 +86,11 @@ class Store:
                     "ts TIMESTAMP, user_email STRING, action STRING, method STRING, "
                     "path STRING, status INT, detail STRING)"
                 )
+                self._exec(
+                    f"CREATE TABLE IF NOT EXISTS {fq}.saved_reports ("
+                    "user_email STRING, id STRING, name STRING, definition STRING, "
+                    "updated_at TIMESTAMP)"
+                )
                 self._ready = True
             except Exception as e:
                 self._ready, self._reason = False, str(e)[:300]
@@ -133,6 +138,51 @@ class Store:
 
     async def put_setting(self, user: str, key: str, value: str) -> None:
         await anyio.to_thread.run_sync(self._put_setting, user, key, value)
+
+    # -- saved reports (4E builder definitions, JSON per user) -------------------
+
+    def _list_reports(self, user: str) -> list[dict[str, str]]:
+        if not self._ensure():
+            return []
+        r = self._exec(
+            f"SELECT id, name, definition, CAST(updated_at AS STRING) "
+            f"FROM {_fq()}.saved_reports WHERE user_email = :user ORDER BY updated_at DESC",
+            {"user": user},
+        )
+        rows = (r.result.data_array or []) if r.result else []
+        keys = ["id", "name", "definition", "updatedAt"]
+        return [dict(zip(keys, row)) for row in rows]
+
+    def _save_report(self, user: str, report_id: str, name: str, definition: str) -> None:
+        if not self._ensure():
+            raise RuntimeError(self._reason or "app-state store unavailable")
+        self._exec(
+            f"""MERGE INTO {_fq()}.saved_reports s
+                USING (SELECT :user AS u, :id AS i, :name AS n, :definition AS d) x
+                ON s.user_email = x.u AND s.id = x.i
+                WHEN MATCHED THEN UPDATE SET name = x.n, definition = x.d,
+                     updated_at = current_timestamp()
+                WHEN NOT MATCHED THEN INSERT (user_email, id, name, definition, updated_at)
+                     VALUES (x.u, x.i, x.n, x.d, current_timestamp())""",
+            {"user": user, "id": report_id, "name": name, "definition": definition},
+        )
+
+    def _delete_report(self, user: str, report_id: str) -> None:
+        if not self._ensure():
+            raise RuntimeError(self._reason or "app-state store unavailable")
+        self._exec(
+            f"DELETE FROM {_fq()}.saved_reports WHERE user_email = :user AND id = :id",
+            {"user": user, "id": report_id},
+        )
+
+    async def list_reports(self, user: str) -> list[dict[str, str]]:
+        return await anyio.to_thread.run_sync(self._list_reports, user)
+
+    async def save_report(self, user: str, report_id: str, name: str, definition: str) -> None:
+        await anyio.to_thread.run_sync(self._save_report, user, report_id, name, definition)
+
+    async def delete_report(self, user: str, report_id: str) -> None:
+        await anyio.to_thread.run_sync(self._delete_report, user, report_id)
 
     # -- audit ------------------------------------------------------------------
 

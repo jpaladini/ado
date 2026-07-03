@@ -5,7 +5,7 @@ import httpx
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
-from app import ai, copilot, genie, insights
+from app import ai, copilot, genie, insights, reportbuilder
 from app.ado.analytics import AnalyticsClient, OPEN_CATEGORIES
 from app.ado.client import ADOClient, ADOConfigError
 from app.config import settings
@@ -199,6 +199,74 @@ async def reports(
         "cfd": cfd_rows,
         "openItems": open_items,
     }
+
+
+# -- report builder (4E: UC metric view semantic layer) ---------------------------
+
+
+class BuilderFilter(BaseModel):
+    dimension: str
+    values: list[str] = []
+
+
+class BuilderDefinition(BaseModel):
+    dimensions: list[str] = []
+    measures: list[str]
+    filters: list[BuilderFilter] = []
+    limit: int | None = None
+
+
+class SavedReportBody(BaseModel):
+    id: str | None = None
+    name: str
+    definition: dict  # BuilderDefinition + presentation (chartType) — stored opaquely
+
+
+@router.get("/reports/builder/meta")
+async def builder_meta() -> dict[str, object]:
+    return await reportbuilder.builder.meta()
+
+
+@router.post("/reports/builder/run")
+async def builder_run(body: BuilderDefinition) -> dict[str, object]:
+    try:
+        return await reportbuilder.builder.run(body.model_dump())
+    except reportbuilder.ReportDefinitionError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e)[:300])
+
+
+@router.get("/reports/saved")
+async def saved_reports(request: Request) -> dict[str, object]:
+    return {"value": await store.list_reports(user_email(request))}
+
+
+@router.put("/reports/saved")
+async def save_report(request: Request, body: SavedReportBody) -> dict[str, object]:
+    import json
+    import uuid
+
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="name is empty")
+    report_id = (body.id or "").strip() or uuid.uuid4().hex[:12]
+    try:
+        await store.save_report(
+            user_email(request), report_id, name, json.dumps(body.definition)
+        )
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e)[:300])
+    return {"id": report_id, "name": name}
+
+
+@router.delete("/reports/saved/{report_id}")
+async def delete_report(request: Request, report_id: str) -> dict[str, object]:
+    try:
+        await store.delete_report(user_email(request), report_id)
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e)[:300])
+    return {"ok": True}
 
 
 @router.get("/projects/{project}/repos/{repo_id}/commits")

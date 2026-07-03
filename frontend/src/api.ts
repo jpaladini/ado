@@ -291,6 +291,60 @@ export const fetchReports = (p: string, range: string, types: string[], assignee
       (assignees.length ? `&assignees=${enc(assignees.join(","))}` : ""),
   );
 
+// -- report builder (4E: UC metric-view semantic layer) ---------------------------
+
+export interface BuilderField {
+  name: string;
+  label: string;
+  kind?: string; // dimensions: "category" | "date"
+  format?: string; // measures: "int" | "days"
+}
+
+export interface BuilderMeta {
+  available: boolean;
+  reason?: string;
+  dimensions: BuilderField[];
+  measures: BuilderField[];
+  view: string;
+  source: string;
+  durationUnit: string;
+}
+
+export interface BuilderDefinition {
+  dimensions: string[];
+  measures: string[];
+  filters?: { dimension: string; values: string[] }[];
+  limit?: number;
+  chartType?: string; // presentation only — ignored by the run endpoint
+}
+
+export interface BuilderResult {
+  columns: string[];
+  rows: Record<string, string | number | null>[];
+}
+
+export interface SavedReport {
+  id: string;
+  name: string;
+  definition: string; // JSON-encoded BuilderDefinition
+  updatedAt: string;
+}
+
+export const fetchBuilderMeta = () => get<BuilderMeta>("/api/reports/builder/meta");
+export const runBuilderReport = (definition: BuilderDefinition) =>
+  send<BuilderResult>("/api/reports/builder/run", "POST", {
+    dimensions: definition.dimensions,
+    measures: definition.measures,
+    filters: definition.filters ?? [],
+    limit: definition.limit,
+  });
+export const fetchSavedReports = () =>
+  get<{ value: SavedReport[] }>("/api/reports/saved");
+export const saveReport = (name: string, definition: BuilderDefinition, id?: string) =>
+  send<{ id: string; name: string }>("/api/reports/saved", "PUT", { id, name, definition });
+export const deleteSavedReport = (id: string) =>
+  send<{ ok: boolean }>(`/api/reports/saved/${enc(id)}`, "DELETE");
+
 export const fetchWorkItems = (p: string) =>
   get<{ value: WorkItem[] }>(`/api/projects/${enc(p)}/workitems`);
 export const fetchWorkItemDetail = (p: string, id: number) =>

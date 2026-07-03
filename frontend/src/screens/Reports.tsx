@@ -8,6 +8,7 @@ import {
 } from "../api";
 import { Card, Empty, ErrorMsg, H1, Loading } from "../components/ui";
 import PlotFigure from "../components/PlotFigure";
+import ReportBuilder from "./ReportBuilder";
 import { stateChip } from "../lib/tokens";
 
 const RANGES = ["7d", "14d", "30d", "90d"] as const;
@@ -124,6 +125,9 @@ export default function Reports({ project }: { project: string }) {
           </div>
         </>
       )}
+
+      {/* -------- 4E: self-serve report builder (UC metric view, batch plane) -------- */}
+      <ReportBuilder />
     </div>
   );
 }

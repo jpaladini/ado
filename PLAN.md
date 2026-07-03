@@ -156,18 +156,23 @@ live operational plane:
   table-edit tools. Genie is already one copilot tool among many
   (`query_analytics_history`, since 2026-07-02).
 
-**4E — Report builder.** *(decision made 2026-07-03: build on UC metric views)*
-- **Verified working on Free Edition**: `CREATE VIEW … WITH METRICS LANGUAGE YAML`
-  over `workspace.ado_analytics.work_items`, queried with `MEASURE()` via the
-  warehouse. Metric views become the semantic layer: measures/dimensions defined
-  once in UC, governed, versioned, and visible to Genie — the builder UI selects
-  dimensions × measures × chart type and the app renders with Observable Plot.
-  **Visuals are unaffected by the data layer** — metric views return rows; we
-  always draw our own charts.
-- Batch-plane caveat: metric views read the ingested Delta (daily/on-demand), so
-  builder reports are historical; the curated 4C widgets stay near-live OData.
-- Saved report definitions per user in the app-state store; saved reports render
-  on the Reports tab under the curated widgets.
+**4E — Report builder.** *(shipped 2026-07-03 on UC metric views)*
+- The app lazily creates metric view
+  `workspace.ado_companion_app.work_items_metrics` (YAML versioned in
+  `src/app/reportbuilder.py`; the app SP owns it, so CREATE OR REPLACE on
+  definition changes works) over `ado_analytics.work_items`. The builder UI on
+  the Reports tab picks dimensions × measures × chart type
+  (auto/bar/line/area/table); definitions are validated against the registry and
+  run as `MEASURE()` SQL with parameterized filters. **Visuals are unaffected by
+  the data layer** — metric views return rows; we always draw our own charts
+  (same PlotFigure components as the curated widgets).
+- Batch-plane caveat holds as designed: builder reports are historical (ingested
+  Delta); the curated 4C widgets stay near-live OData.
+- Saved report definitions per user in `ado_companion_app.saved_reports`, rendered
+  under the curated widgets. Lead-time measures use a SQL business-days closed
+  form (epoch-Monday method) proven equal to `business_days_between` in tests.
+- Deferred: filter UI (backend accepts parameterized dimension filters already);
+  holiday calendars ride on the Reports-wide v2 item.
 
 **4F — Code browser + AI PR review.** *(shipped 2026-07-02, pulled ahead of 4C/4E
 because it unlocks the copilot's PR-review tools)*
