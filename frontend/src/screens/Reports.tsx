@@ -53,15 +53,18 @@ export default function Reports({ project }: { project: string }) {
         <H1>Reports</H1>
         <span className="flex items-center gap-[12px] text-[11px] text-faint">
           All durations in <span className="font-semibold text-text-3">business days</span> (Mon–Fri)
-          <a
-            href={`/api/projects/${encodeURIComponent(project)}/reports/export?range=${range}${
-              types.size ? `&types=${encodeURIComponent([...types].join(","))}` : ""
-            }${assignees.size ? `&assignees=${encodeURIComponent([...assignees].join(","))}` : ""}`}
-            download
-            className="rounded-[7px] border border-border bg-surface px-[10px] py-[4px] text-[11.5px] font-medium text-text-3 hover:border-faint"
-          >
-            Export .xlsx
-          </a>
+          {(["xlsx", "pdf"] as const).map((fmt) => (
+            <a
+              key={fmt}
+              href={`/api/projects/${encodeURIComponent(project)}/reports/export?range=${range}&format=${fmt}${
+                types.size ? `&types=${encodeURIComponent([...types].join(","))}` : ""
+              }${assignees.size ? `&assignees=${encodeURIComponent([...assignees].join(","))}` : ""}`}
+              download
+              className="rounded-[7px] border border-border bg-surface px-[10px] py-[4px] text-[11.5px] font-medium text-text-3 hover:border-faint"
+            >
+              Export .{fmt}
+            </a>
+          ))}
         </span>
       </div>
 

@@ -6,6 +6,7 @@ import {
   fetchSavedReports,
   runBuilderReport,
   saveReport,
+  type BuilderField,
   type BuilderDefinition,
   type BuilderMeta,
   type BuilderResult,
@@ -30,6 +31,7 @@ export default function ReportBuilder() {
   const [dims, setDims] = useState<string[]>([]);
   const [measures, setMeasures] = useState<string[]>(["items"]);
   const [chartType, setChartType] = useState<string>("auto");
+  const [filters, setFilters] = useState<Record<string, string[]>>({});
   const [name, setName] = useState("");
 
   const meta = metaQ.data;
@@ -52,8 +54,15 @@ export default function ReportBuilder() {
   };
 
   const definition: BuilderDefinition = useMemo(
-    () => ({ dimensions: dims, measures, chartType }),
-    [dims, measures, chartType],
+    () => ({
+      dimensions: dims,
+      measures,
+      chartType,
+      filters: Object.entries(filters)
+        .filter(([, vs]) => vs.length)
+        .map(([dimension, values]) => ({ dimension, values })),
+    }),
+    [dims, measures, chartType, filters],
   );
 
   const run = useMutation({ mutationFn: () => runBuilderReport(definition) });
@@ -118,6 +127,20 @@ export default function ReportBuilder() {
               </FieldGroup>
             </div>
 
+            {/* -------- filters: value chips per category dimension -------- */}
+            <div className="mt-[12px] flex flex-wrap items-start gap-x-[18px] gap-y-[10px] border-t border-line pt-[12px]">
+              {meta.dimensions
+                .filter((d) => d.kind === "category")
+                .map((d) => (
+                  <DimFilter
+                    key={d.name}
+                    dim={d}
+                    selected={filters[d.name] ?? []}
+                    onChange={(vals) => setFilters((f) => ({ ...f, [d.name]: vals }))}
+                  />
+                ))}
+            </div>
+
             <div className="mt-[12px] flex items-center gap-[8px] border-t border-line pt-[12px]">
               <button
                 onClick={() => run.mutate()}
@@ -163,6 +186,41 @@ export default function ReportBuilder() {
         </>
       )}
     </div>
+  );
+}
+
+/** Value chips for one category dimension — distinct values come from the metric
+ * view itself (a one-dim query), loaded lazily and cached. */
+function DimFilter({
+  dim,
+  selected,
+  onChange,
+}: {
+  dim: BuilderField;
+  selected: string[];
+  onChange: (vals: string[]) => void;
+}) {
+  const valuesQ = useQuery({
+    queryKey: ["builder-dim-values", dim.name],
+    queryFn: () => runBuilderReport({ dimensions: [dim.name], measures: ["items"], limit: 30 }),
+    staleTime: 5 * 60_000,
+  });
+  const values = (valuesQ.data?.rows ?? [])
+    .map((r) => String(r[dim.name] ?? ""))
+    .filter(Boolean);
+  const toggle = (v: string) =>
+    onChange(selected.includes(v) ? selected.filter((x) => x !== v) : [...selected, v]);
+
+  return (
+    <FieldGroup label={`Filter · ${dim.label}${selected.length ? ` (${selected.length})` : ""}`}>
+      {valuesQ.isLoading && <span className="text-[11px] text-faint">loading…</span>}
+      {values.map((v) => (
+        <BuilderChip key={v} on={selected.includes(v)} onClick={() => toggle(v)}>
+          {v}
+        </BuilderChip>
+      ))}
+      {!valuesQ.isLoading && !values.length && <span className="text-[11px] text-faint">no values</span>}
+    </FieldGroup>
   );
 }
 

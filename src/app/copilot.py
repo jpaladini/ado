@@ -588,6 +588,7 @@ async def chat(project: str, message: str, history: list[dict[str, str]] | None 
 
     tool_calls_made: list[dict[str, Any]] = []
     proposals: list[dict[str, Any]] = []
+    tables: list[dict[str, Any]] = []  # Genie result tables → downloadable artifacts
     reply = ""
 
     with _span("copilot.turn", endpoint=endpoint, project=project) as turn:
@@ -655,6 +656,19 @@ async def chat(project: str, message: str, history: list[dict[str, str]] | None 
                         if ts:
                             ts.set_outputs({"result": str(result)[:500]})
                     tool_calls_made.append({"name": name, "args": args})
+                    # Tabular Genie answers become downloadable artifacts in the UI.
+                    if (
+                        name == "query_analytics_history"
+                        and isinstance(result, dict)
+                        and result.get("columns")
+                        and result.get("rows")
+                        and len(tables) < 3
+                    ):
+                        tables.append({
+                            "name": str(args.get("question") or "analytics")[:60],
+                            "columns": result["columns"],
+                            "rows": result["rows"],
+                        })
 
                 messages.append({
                     "role": "tool",
@@ -674,5 +688,6 @@ async def chat(project: str, message: str, history: list[dict[str, str]] | None 
         "reply": reply,
         "toolCalls": tool_calls_made,
         "proposals": proposals,
+        "tables": tables,
         "endpoint": endpoint,
     }

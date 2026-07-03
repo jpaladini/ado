@@ -207,24 +207,34 @@ async def reports(
     return await _gather_reports(project, range, types, assignees)
 
 
+_EXPORT_MEDIA = {
+    "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "pdf": "application/pdf",
+}
+
+
 @router.get("/projects/{project}/reports/export")
 async def reports_export(
     project: str,
     range: str = Query("30d"),
     types: str = Query(""),
     assignees: str = Query(""),
+    format: str = Query("xlsx"),
 ):
-    """The same flow metrics as an .xlsx download (all durations business days)."""
+    """The same flow metrics as a download (all durations business days)."""
     from fastapi.responses import Response
 
     from app import exports
 
+    if format not in _EXPORT_MEDIA:
+        raise HTTPException(status_code=422, detail="format must be xlsx or pdf")
     payload = await _gather_reports(project, range, types, assignees)
-    data = exports.reports_workbook(project, payload)
-    fname = f"flow-metrics-{project}-{range}.xlsx"
+    build = exports.reports_workbook if format == "xlsx" else exports.reports_pdf
+    data = build(project, payload)
+    fname = f"flow-metrics-{project}-{range}.{format}"
     return Response(
         content=data,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        media_type=_EXPORT_MEDIA[format],
         headers={"Content-Disposition": f'attachment; filename="{fname}"'},
     )
 
@@ -499,6 +509,32 @@ async def copilot_chat(body: CopilotBody) -> dict[str, object]:
         )
     except httpx.HTTPError:
         raise HTTPException(status_code=502, detail="Could not reach the model endpoint")
+
+
+# -- generic table artifact (copilot/Genie results → xlsx) --------------------------
+
+
+class TableExportBody(BaseModel):
+    name: str = "data"
+    columns: list[str]
+    rows: list[list[object]]
+
+
+@router.post("/export/table")
+async def export_table(body: TableExportBody):
+    from fastapi.responses import Response
+
+    from app import exports
+
+    if not body.columns or len(body.rows) > 5000:
+        raise HTTPException(status_code=422, detail="need columns; max 5000 rows")
+    data = exports.table_workbook(body.name, body.columns, body.rows)
+    safe = "".join(c if c.isalnum() or c in "-_ " else "_" for c in body.name)[:40].strip() or "data"
+    return Response(
+        content=data,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{safe}.xlsx"'},
+    )
 
 
 # -- copilot session history (per-user chat state in the app-state store) ----------

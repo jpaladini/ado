@@ -6,6 +6,7 @@ import {
   createPrThread,
   createWorkItem,
   deleteCopilotSession,
+  downloadTableXlsx,
   fetchCopilotSession,
   fetchCopilotSessions,
   fetchHealth,
@@ -317,6 +318,20 @@ function AnswerView({
         </div>
       )}
       <p className="m-0 whitespace-pre-wrap text-[13px] text-text">{a.reply}</p>
+      {(a.tables ?? []).length > 0 && (
+        <div className="flex flex-wrap gap-[6px]">
+          {(a.tables ?? []).map((t, i) => (
+            <button
+              key={i}
+              onClick={() => downloadTableXlsx(t).catch(() => {})}
+              title={`${t.rows.length} rows`}
+              className="rounded-[7px] border border-border bg-surface px-[10px] py-[4px] text-[11.5px] font-medium text-text-3 hover:border-faint"
+            >
+              ⇩ {t.name}.xlsx
+            </button>
+          ))}
+        </div>
+      )}
       {a.proposals.map((p) => (
         <ProposalCard
           key={p.id}

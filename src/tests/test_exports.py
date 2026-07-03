@@ -3,7 +3,7 @@ from io import BytesIO
 
 from openpyxl import load_workbook
 
-from app.exports import reports_workbook
+from app.exports import reports_pdf, reports_workbook, table_workbook
 
 PAYLOAD = {
     "range": "30d",
@@ -53,3 +53,16 @@ def test_workbook_sheets_and_values():
 
     assert [c.value for c in wb["Cycle times"][2]] == [4, "Fix", "Issue", "2026-07-02", 2, 3]
     assert [c.value for c in wb["Cumulative flow"][2]] == ["2026-07-01", "Proposed", 3]
+
+
+def test_reports_pdf_renders():
+    data = reports_pdf("home", PAYLOAD)
+    assert data[:5] == b"%PDF-"
+    assert len(data) > 1200  # KPIs + three tables, not an empty shell
+
+
+def test_table_workbook_roundtrip():
+    wb = load_workbook(BytesIO(table_workbook("items by state", ["state", "n"], [["To Do", 3]])))
+    ws = wb["items by state"]
+    assert [c.value for c in ws[1]] == ["state", "n"]
+    assert [c.value for c in ws[2]] == ["To Do", 3]

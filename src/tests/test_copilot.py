@@ -351,3 +351,43 @@ async def test_step_limit(monkeypatch):
     out = await copilot.chat("home", "loop forever")
     assert "step limit" in out["reply"]
     assert len(out["toolCalls"]) == copilot.MAX_TURNS
+
+
+@pytest.mark.asyncio
+async def test_genie_tables_surface_as_artifacts(monkeypatch):
+    responses = iter([
+        _mk_response(tool_calls=[_tc("c1", "query_analytics_history", {"question": "items by state"})]),
+        _mk_response(content="Mostly To Do."),
+    ])
+
+    async def fake_invoke(endpoint, messages, tools):
+        return next(responses)
+
+    async def fake_read(name, args, project):
+        return {"text": "…", "columns": ["state", "n"], "rows": [["To Do", 3]], "note": "batch"}
+
+    monkeypatch.setattr(copilot, "_invoke", fake_invoke)
+    monkeypatch.setattr(copilot, "_run_read_tool", fake_read)
+
+    out = await copilot.chat("home", "items by state?")
+    assert out["tables"] == [{"name": "items by state", "columns": ["state", "n"], "rows": [["To Do", 3]]}]
+
+
+@pytest.mark.asyncio
+async def test_non_tabular_tool_results_produce_no_tables(monkeypatch):
+    responses = iter([
+        _mk_response(tool_calls=[_tc("c1", "list_work_items", {})]),
+        _mk_response(content="done"),
+    ])
+
+    async def fake_invoke(endpoint, messages, tools):
+        return next(responses)
+
+    async def fake_read(name, args, project):
+        return [{"id": 1}]
+
+    monkeypatch.setattr(copilot, "_invoke", fake_invoke)
+    monkeypatch.setattr(copilot, "_run_read_tool", fake_read)
+
+    out = await copilot.chat("home", "list items")
+    assert out["tables"] == []

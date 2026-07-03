@@ -245,3 +245,29 @@ def test_builder_audit_action_names():
     assert _action_name("POST", "/api/reports/builder/run") == "report.run"
     assert _action_name("PUT", "/api/reports/saved") == "report.save"
     assert _action_name("DELETE", "/api/reports/saved/abc123") == "report.delete"
+
+
+def test_ensure_falls_back_to_existing_view_when_replace_denied(monkeypatch):
+    b = rb.ReportBuilder()
+    calls = []
+
+    def fake_exec(sql, params=None):
+        calls.append(sql)
+        if sql.startswith("CREATE OR REPLACE"):
+            raise RuntimeError("PERMISSION_DENIED: not the owner")
+        return None  # the probe SELECT succeeds
+
+    monkeypatch.setattr(b, "_exec", fake_exec)
+    assert b._ensure() is True  # owned-elsewhere view is still usable
+    assert any(s.startswith("SELECT MEASURE") for s in calls)
+
+
+def test_ensure_unavailable_when_view_missing_too(monkeypatch):
+    b = rb.ReportBuilder()
+
+    def fake_exec(sql, params=None):
+        raise RuntimeError("TABLE_OR_VIEW_NOT_FOUND")
+
+    monkeypatch.setattr(b, "_exec", fake_exec)
+    assert b._ensure() is False
+    assert "TABLE_OR_VIEW_NOT_FOUND" in (b._reason or "")

@@ -24,11 +24,38 @@ export interface CopilotProposal {
   args: Record<string, unknown>;
 }
 
+export interface CopilotTable {
+  name: string;
+  columns: string[];
+  rows: (string | number | null)[][];
+}
+
 export interface CopilotReply {
   reply: string;
   toolCalls: CopilotToolCall[];
   proposals: CopilotProposal[];
+  tables?: CopilotTable[];
   endpoint: string;
+}
+
+/** POST a table and hand the resulting .xlsx to the browser as a download. */
+export async function downloadTableXlsx(t: CopilotTable): Promise<void> {
+  const res = await fetch("/api/export/table", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(t),
+  });
+  if (!res.ok) {
+    const b = await res.json().catch(() => ({}));
+    throw new Error(b.detail ?? `Export failed (${res.status})`);
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${t.name.replace(/[^\w\- ]+/g, "_").slice(0, 40) || "data"}.xlsx`;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 export interface GenieAnswer {

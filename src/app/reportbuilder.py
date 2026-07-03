@@ -214,9 +214,20 @@ class ReportBuilder:
                 self._exec(metric_view_ddl())
                 self._ready = True
             except Exception as e:
-                self._ready, self._reason = False, str(e)[:300]
-                self._checked_at = time.monotonic()
-                log.warning("report builder unavailable (will retry): %s", self._reason)
+                # CREATE OR REPLACE fails if another principal owns the view
+                # (e.g. a developer's local run created it). A queryable view is
+                # still a working semantic layer — degrade to read-only, loudly.
+                try:
+                    self._exec(f"SELECT MEASURE(`items`) FROM {view_fq()} LIMIT 1")
+                    self._ready = True
+                    log.warning(
+                        "metric view exists but is owned elsewhere — using it as is; "
+                        "definition updates need an owner change (%s)", str(e)[:200],
+                    )
+                except Exception:
+                    self._ready, self._reason = False, str(e)[:300]
+                    self._checked_at = time.monotonic()
+                    log.warning("report builder unavailable (will retry): %s", self._reason)
         return self._ready
 
     def _meta(self) -> dict[str, Any]:
