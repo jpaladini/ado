@@ -134,6 +134,73 @@ async def analytics(project: str, range: str = Query("7d")) -> dict[str, object]
     }
 
 
+_REPORT_RANGES = {"7d": 7, "14d": 14, "30d": 30, "90d": 90}
+
+
+def _percentile(sorted_vals: list[float], p: float) -> float:
+    if not sorted_vals:
+        return 0.0
+    k = max(0, min(len(sorted_vals) - 1, round(p * (len(sorted_vals) - 1))))
+    return sorted_vals[k]
+
+
+@router.get("/projects/{project}/reports")
+async def reports(
+    project: str,
+    range: str = Query("30d"),
+    types: str = Query(""),
+    assignees: str = Query(""),
+) -> dict[str, object]:
+    """Everything the Reports tab draws, in one round trip. All aggregation is
+    server-side OData $apply; KPIs are derived here from the same payloads."""
+    import asyncio
+
+    days = _REPORT_RANGES.get(range, 30)
+    type_list = [t for t in (s.strip() for s in types.split(",")) if t] or None
+    assignee_list = [a for a in (s.strip() for s in assignees.split(",")) if a] or None
+
+    try:
+        client = AnalyticsClient()
+        created, completed, cycle, cfd_rows, open_items = await asyncio.gather(
+            client.created_per_day(project, days, type_list, assignee_list),
+            client.completed_per_day(project, days, type_list, assignee_list),
+            client.cycle_time_items(project, days, type_list, assignee_list),
+            client.cfd(project, days, type_list, assignee_list),
+            client.open_items_detail(project, type_list, assignee_list),
+        )
+    except ADOConfigError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=502, detail=f"Analytics returned {e.response.status_code}")
+    except httpx.HTTPError:
+        raise HTTPException(status_code=502, detail="Could not reach ADO Analytics")
+
+    # KPIs use 5-day-workweek durations (Jason: calendar-day cycle times are why
+    # a custom Power BI semantic model existed — never again).
+    cycle_bdays = sorted(float(i["cycleBdays"]) for i in cycle)
+    created_total = sum(r["count"] for r in created)
+    completed_total = sum(r["count"] for r in completed)
+    return {
+        "range": range,
+        "days": days,
+        "durationUnit": "businessDays",
+        "kpis": {
+            "throughput": completed_total,
+            "created": created_total,
+            "netFlow": created_total - completed_total,
+            "wip": len(open_items),
+            "cycleP50": _percentile(cycle_bdays, 0.5),
+            "cycleP85": _percentile(cycle_bdays, 0.85),
+            "oldestWipDays": max((i["ageBdays"] for i in open_items), default=0),
+        },
+        "createdPerDay": created,
+        "completedPerDay": completed,
+        "cycleItems": cycle,
+        "cfd": cfd_rows,
+        "openItems": open_items,
+    }
+
+
 @router.get("/projects/{project}/repos/{repo_id}/commits")
 async def commits(project: str, repo_id: str, top: int = Query(25, le=100)) -> dict[str, object]:
     return {"value": await _call(lambda c: c.list_commits(project, repo_id, top=top))}

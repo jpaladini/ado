@@ -238,6 +238,59 @@ export interface Analytics {
 export const fetchAnalytics = (p: string, range: string) =>
   get<Analytics>(`/api/projects/${enc(p)}/analytics?range=${range}`);
 
+// -- 4C reports (all durations are 5-day-workweek business days) -------------------
+
+export interface ReportKpis {
+  throughput: number;
+  created: number;
+  netFlow: number;
+  wip: number;
+  cycleP50: number;
+  cycleP85: number;
+  oldestWipDays: number;
+}
+
+export interface CycleItem {
+  id: number;
+  title: string;
+  type: string;
+  cycleDays: number;
+  leadDays: number;
+  cycleBdays: number;
+  leadBdays: number;
+  closedDate: string;
+}
+
+export interface OpenItem {
+  id: number;
+  title: string;
+  type: string;
+  state: string;
+  category: string;
+  assignee: string | null;
+  ageDays: number;
+  ageBdays: number;
+}
+
+export interface ReportsPayload {
+  range: string;
+  days: number;
+  durationUnit: string;
+  kpis: ReportKpis;
+  createdPerDay: { dateSK: number; count: number }[];
+  completedPerDay: { dateSK: number; count: number }[];
+  cycleItems: CycleItem[];
+  cfd: { date: string; category: string; count: number }[];
+  openItems: OpenItem[];
+}
+
+export const fetchReports = (p: string, range: string, types: string[], assignees: string[]) =>
+  get<ReportsPayload>(
+    `/api/projects/${enc(p)}/reports?range=${range}` +
+      (types.length ? `&types=${enc(types.join(","))}` : "") +
+      (assignees.length ? `&assignees=${enc(assignees.join(","))}` : ""),
+  );
+
 export const fetchWorkItems = (p: string) =>
   get<{ value: WorkItem[] }>(`/api/projects/${enc(p)}/workitems`);
 export const fetchWorkItemDetail = (p: string, id: number) =>

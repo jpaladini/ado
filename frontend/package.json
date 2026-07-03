@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@observablehq/plot": "^0.6.17",
     "@tanstack/react-query": "^5.62.0",
     "highlight.js": "^11.11.1",
     "react": "^18.3.1",

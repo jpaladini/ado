@@ -126,15 +126,19 @@ through the trunk (GitHub → mirror → ADO PR → pipeline).
 - Backend additions: create_work_item, update_work_item fields beyond state, identity
   search (assignee picker), comments list, area/iteration paths.
 
-**4C — Analytics tab → Reports.**
-- ~~The Genie chat moves out~~ *Done 2026-07-02: the Genie chat was removed from
-  Analytics and became the copilot's `query_analytics_history` tool (Jason's call —
-  one chat surface).* Analytics becomes report widgets: state distribution,
-  created vs completed, throughput/week, cycle time, per-assignee workload — each driven
-  by OData `$apply` with shared **filters: assignee(s), work-item type, date range**
-  (the existing 24h/7d/30d control generalizes to a date-range picker).
-- Backend: extend the analytics client with parameterized filters (AssignedTo/UserName,
-  WorkItemType, DateValue/CreatedDate windows).
+**4C — Reports tab.** *(shipped 2026-07-02/03)*
+- Flow analytics for a high-velocity data team, all OData `$apply` server-side with
+  shared filters (range 7/14/30/90d, work-item types, assignees), one aggregate
+  `/reports` endpoint: KPI strip (throughput, net flow, WIP, cycle p50/p85),
+  created-vs-completed, cumulative flow (snapshots), cycle-time scatter with
+  percentile bands, aging-WIP dots vs those bands, workload by assignee,
+  needs-attention list.
+- **All durations are 5-day-workweek business days** (`business_days_between` in
+  analytics.py) — retires Jason's custom Power BI semantic model. ADO's calendar
+  values are kept alongside for reference. Holiday calendars: future option.
+- Charts: **Observable Plot** (ISC-licensed, lazy-loaded Vite chunk, zero runtime
+  calls to any external service, themed on the CSS design tokens — light/dark free).
+- Copilot gains `get_flow_metrics` (same aggregates, business-day durations).
 
 **4D — AI Copilot (re-scoped 2026-07-02; v1 shipped).** Not a Genie chat relocation —
 a **tool-calling agent** over an FMAPI serving endpoint (name is config) acting on the
@@ -152,12 +156,18 @@ live operational plane:
   table-edit tools. Genie is already one copilot tool among many
   (`query_analytics_history`, since 2026-07-02).
 
-**4E — Report builder.**
-- Visual query builder over the OData analytics surface: entity (work items /
-  snapshots), filters, group-bys, aggregate, chart type (table/bar/line/donut).
-  Generates the `$apply` behind the scenes; "run" renders the widget; "save" stores the
-  report definition per user (app-state store); saved reports render on the Reports tab.
-- Explicitly *not* raw WIQL v1 — the OData aggregate surface covers reporting better.
+**4E — Report builder.** *(decision made 2026-07-03: build on UC metric views)*
+- **Verified working on Free Edition**: `CREATE VIEW … WITH METRICS LANGUAGE YAML`
+  over `workspace.ado_analytics.work_items`, queried with `MEASURE()` via the
+  warehouse. Metric views become the semantic layer: measures/dimensions defined
+  once in UC, governed, versioned, and visible to Genie — the builder UI selects
+  dimensions × measures × chart type and the app renders with Observable Plot.
+  **Visuals are unaffected by the data layer** — metric views return rows; we
+  always draw our own charts.
+- Batch-plane caveat: metric views read the ingested Delta (daily/on-demand), so
+  builder reports are historical; the curated 4C widgets stay near-live OData.
+- Saved report definitions per user in the app-state store; saved reports render
+  on the Reports tab under the curated widgets.
 
 **4F — Code browser + AI PR review.** *(shipped 2026-07-02, pulled ahead of 4C/4E
 because it unlocks the copilot's PR-review tools)*

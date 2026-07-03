@@ -227,6 +227,17 @@ READ_TOOLS: list[dict[str, Any]] = [
         ["repositoryId", "path"],
     ),
     _schema(
+        "get_flow_metrics",
+        "Team flow metrics over a window (near-live, server-aggregated): throughput, "
+        "created vs completed, cycle time p50/p85, WIP with ages, workload by assignee. "
+        "Use this for velocity/cycle-time/workload questions.",
+        {
+            "days": {"type": "integer", "description": "Window in days (default 30, max 90)."},
+            "workItemType": {"type": "string", "description": "Optional type filter, e.g. Issue."},
+        },
+        [],
+    ),
+    _schema(
         "query_analytics_history",
         "Ask Databricks Genie a natural-language BI question over the INGESTED analytics "
         "tables (Delta, refreshed daily — NOT real-time). Use for trends, history, and "
@@ -333,6 +344,45 @@ async def _run_read_tool(name: str, args: dict[str, Any], project: str) -> Any:
             "byCategory": by_cat,
             "open": sum(v for k, v in by_cat.items() if k in OPEN_CATEGORIES),
             "total": sum(by_cat.values()),
+        }
+    if name == "get_flow_metrics":
+        import asyncio
+
+        a = AnalyticsClient()
+        days = min(int(args.get("days") or 30), 90)
+        types = [str(args["workItemType"])] if args.get("workItemType") else None
+        created, completed, cycle, open_items = await asyncio.gather(
+            a.created_per_day(project, days, types),
+            a.completed_per_day(project, days, types),
+            a.cycle_time_items(project, days, types, top=200),
+            a.open_items_detail(project, types, top=200),
+        )
+        cycle_days = sorted(float(i["cycleBdays"]) for i in cycle)
+
+        def pct(p: float) -> float:
+            if not cycle_days:
+                return 0.0
+            k = max(0, min(len(cycle_days) - 1, round(p * (len(cycle_days) - 1))))
+            return cycle_days[k]
+
+        workload: dict[str, int] = {}
+        for i in open_items:
+            workload[i["assignee"] or "Unassigned"] = workload.get(i["assignee"] or "Unassigned", 0) + 1
+        oldest = sorted(open_items, key=lambda i: -i["ageDays"])[:5]
+        return {
+            "windowDays": days,
+            "throughput": sum(r["count"] for r in completed),
+            "created": sum(r["count"] for r in created),
+            "wip": len(open_items),
+            "cycleTimeP50BusinessDays": pct(0.5),
+            "cycleTimeP85BusinessDays": pct(0.85),
+            "workloadByAssignee": workload,
+            "oldestOpenItems": [
+                {"id": i["id"], "title": i["title"], "ageBusinessDays": i["ageBdays"], "state": i["state"]}
+                for i in oldest
+            ],
+            "note": "Near-live ADO Analytics aggregates; durations are 5-day-workweek "
+                    "business days, not calendar days.",
         }
     if name == "query_analytics_history":
         try:

@@ -1,35 +1,7 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchFreshness, refreshAnalyticsData } from "../api";
-import { Card, H1 } from "../components/ui";
-import { useToast } from "../components/Toast";
-
-// The Genie chat that used to live here moved into the AI Copilot as the
-// query_analytics_history tool (2026-07-02). This tab keeps the data-freshness
-// controls and becomes the home of the 4C report widgets.
-
-export default function Analytics() {
-  return (
-    <div className="mx-auto max-w-[840px]">
-      <H1>Analytics</H1>
-      <p className="m-0 mt-[5px] text-[12.5px] text-muted">
-        Dashboards over the ingested Delta tables. For questions in plain language — live or
-        historical — use the <span className="font-semibold text-text-3">AI Copilot</span> tab.
-      </p>
-      <FreshnessBar />
-
-      <Card className="mt-5 p-[16px_18px]">
-        <div className="text-[13px] font-semibold text-text">Report widgets are on the way</div>
-        <p className="mt-1 text-[12.5px] text-muted">
-          This tab is becoming filtered report widgets — state distribution, created vs completed,
-          throughput, and per-assignee workload with shared assignee/type/date filters (PLAN.md
-          §5a, 4C). Until then, the Overview tab has live aggregates, and the AI Copilot answers
-          historical questions from the same data shown fresh here.
-        </p>
-      </Card>
-    </div>
-  );
-}
+import { useToast } from "./Toast";
 
 function fmtUpdated(iso?: string | null): string | null {
   if (!iso) return null;
@@ -42,7 +14,10 @@ function fmtUpdated(iso?: string | null): string | null {
   return d.toLocaleString();
 }
 
-function FreshnessBar() {
+/** Freshness + refresh control for the *batch* Delta tables (the AI's
+ * query_analytics_history tool reads them). Lives on the AI tab since the
+ * Reports tab is near-live OData and doesn't depend on the ingest. */
+export default function FreshnessBar() {
   const qc = useQueryClient();
   const toast = useToast();
   // updatedAt at the moment a refresh was triggered; non-null = actively watching
@@ -51,7 +26,6 @@ function FreshnessBar() {
     queryKey: ["freshness"],
     queryFn: fetchFreshness,
     staleTime: 60_000,
-    // while a refresh is in flight, poll until the table's write-time changes
     refetchInterval: baseline !== null ? 20_000 : false,
   });
 
@@ -69,7 +43,6 @@ function FreshnessBar() {
       if (r.started) {
         toast("Data refresh started — takes ~2 minutes");
         setBaseline(updatedAt ?? "pending");
-        // safety: stop watching after 8 minutes regardless
         setTimeout(() => setBaseline(null), 480_000);
         qc.invalidateQueries({ queryKey: ["freshness"] });
       } else {
@@ -84,7 +57,7 @@ function FreshnessBar() {
   return (
     <div className="mt-2 flex items-center gap-2 text-[11.5px] text-faint">
       <span>
-        Data as of <span className="font-mono text-text-3">{fresh.data.asOf ?? "—"}</span>
+        Historical data as of <span className="font-mono text-text-3">{fresh.data.asOf ?? "—"}</span>
         {updated && (
           <>
             {" "}· updated{" "}

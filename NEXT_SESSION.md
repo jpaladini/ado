@@ -138,8 +138,12 @@ things (Jason's merges lagged the session, so commits stacked on the open PR):
    (pr.comment audit). ai.review audit + MLflow span.
 4. **Blog website handoff brief** (docs/blog/WEBSITE_HANDOFF.md).
 
-**Next up: 4C → 4E** (full detail in PLAN.md §5a):
-- **4C — Reports** *(START HERE next)*: Analytics tab → report widgets w/ assignee/type/date filters (OData).
+**Also shipped 2026-07-02/03** (PRs #17 in-place AI review, #18 code-tab UX, and the
+4C Reports PR): Reports tab (Observable Plot flow analytics, business-day durations —
+see PLAN §5a 4C), in-place AI PR review, code-tab collapse/preview/Explain.
+
+**Next up: 4E report builder on UC metric views** (verified working on Free Edition —
+see PLAN §5a 4E), then copilot session history, then artifacts (PDF/Excel).
 - **4D — AI tab**: move Genie chat to dedicated tab + per-user session history (store).
 - **4E — Report builder**: visual OData query builder + saved reports (store).
 - **4F — Code browser**: branch picker, file tree, file viewer w/ highlighting.

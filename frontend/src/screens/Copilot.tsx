@@ -13,6 +13,7 @@ import {
   type WorkItemUpdatePayload,
 } from "../api";
 import { Card, H1 } from "../components/ui";
+import FreshnessBar from "../components/FreshnessBar";
 import { Spark } from "../components/icons";
 import { textToHtml } from "../lib/text";
 import { useToast } from "../components/Toast";
@@ -81,6 +82,7 @@ export default function Copilot({ project }: { project: string }) {
         An agent over your live Azure DevOps data. It reads freely; every change it wants to make
         comes back as a proposal you apply.
       </p>
+      <FreshnessBar />
 
       {turns.length === 0 && (
         <div className="mt-6 grid grid-cols-2 gap-2">

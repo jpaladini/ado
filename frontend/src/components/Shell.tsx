@@ -22,12 +22,12 @@ import WorkItems from "../screens/WorkItems";
 import PullRequests from "../screens/PullRequests";
 import Pipelines from "../screens/Pipelines";
 import Code from "../screens/Code";
-import Analytics from "../screens/Analytics";
+import Reports from "../screens/Reports";
 import Copilot from "../screens/Copilot";
 import UserFooter from "./UserFooter";
 
 const TABS = ["Overview", "Work Items", "Pull Requests", "Pipelines", "Code"] as const;
-type Tab = (typeof TABS)[number] | "Analytics" | "AI";
+type Tab = (typeof TABS)[number] | "Reports" | "AI";
 
 const ICONS: Record<(typeof TABS)[number], (p: { size?: number }) => JSX.Element> = {
   Overview: IconOverview,
@@ -119,18 +119,18 @@ export default function Shell({
             AI Copilot
           </button>
           <button
-            onClick={() => setTab("Analytics")}
+            onClick={() => setTab("Reports")}
             className={`relative flex items-center gap-[10px] rounded-[8px] px-[11px] py-[8px] text-[13px] ${
-              tab === "Analytics"
+              tab === "Reports"
                 ? "bg-accent-tint font-semibold text-accent-text"
                 : "font-medium text-text-2 hover:bg-hover"
             }`}
           >
-            {tab === "Analytics" && (
+            {tab === "Reports" && (
               <span className="absolute bottom-[8px] left-0 top-[8px] w-[3px] rounded-[2px] bg-accent" />
             )}
             <IconAnalytics size={16} />
-            Analytics
+            Reports
           </button>
           <span className="flex cursor-default items-center gap-[10px] rounded-[8px] px-[11px] py-[8px] text-[13px] font-medium text-text-2">
             <IconActivity size={16} />
@@ -174,7 +174,7 @@ export default function Shell({
           {tab === "Pull Requests" && <PullRequests project={project.name} />}
           {tab === "Pipelines" && <Pipelines project={project.name} />}
           {tab === "Code" && <Code project={project.name} />}
-          {tab === "Analytics" && <Analytics />}
+          {tab === "Reports" && <Reports project={project.name} />}
           {tab === "AI" && <Copilot project={project.name} />}
         </div>
       </div>
