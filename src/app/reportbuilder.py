@@ -240,9 +240,11 @@ class ReportBuilder:
         return meta
 
     def _run(self, definition: dict[str, Any]) -> dict[str, Any]:
+        # validate before the availability probe: a bad definition is the caller's
+        # 422 even when the warehouse is down
+        sql, params = build_query(definition)
         if not self._ensure():
             raise RuntimeError(self._reason or "report builder unavailable")
-        sql, params = build_query(definition)
         r = self._exec(sql, params)
         cols = (
             [c.name for c in r.manifest.schema.columns]

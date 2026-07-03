@@ -133,9 +133,9 @@ API reads, Genie space creation) is allowed.
   Search extension — see AGENTS rule 11). Results deep-link: work item → edit
   drawer, code file → Code tab viewer (prefers `dev` branch). Planes fail
   independently; index is TTL-cached (300s), skips minified/lockfiles/binaries.
-- **Tests**: 88 pytest (19 new for the report builder), ~72% line coverage (client 92%, ai 83%; routes 56% — offered
-  TestClient+CI-gate PR, not yet requested). Frontend has no automated tests
-  (Playwright screenshots + live smokes per PR instead).
+- **Tests**: 116 pytest, ~73% line coverage (routes 64% after the TestClient route
+  suite in test_routes.py; exports 100%, codesearch 89%). No CI coverage gate yet.
+  Frontend has no automated tests (Playwright screenshots + live smokes per PR).
 
 **Next up (agreed order):**
 1. ~~4E report builder~~ **SHIPPED 2026-07-03**: metric view
@@ -154,10 +154,15 @@ API reads, Genie space creation) is allowed.
    (413 cap 400k chars), session-chip bar on the Copilot screen with autosave
    (debounced, after answered turns), restore, and delete. Audit:
    `copilot.session.save/delete`.
-3. Artifacts: PDF/Excel exports from copilot + Reports (openpyxl/weasyprint).
-4. Small: PR/work-item row-click affordance chevrons (promised, unshipped);
-   route-tests + coverage gate; model eval harness before swapping
-   `copilot_endpoint` to `databricks-claude-sonnet-5` in corporate.
+3. ~~Excel export~~ **Reports .xlsx SHIPPED 2026-07-03** (`app/exports.py`, openpyxl;
+   `GET /api/projects/{p}/reports/export`, Export button honors filters).
+   Remaining: PDF (weasyprint needs system cairo/pango — VERIFY the Apps runtime
+   before adding the dependency; a broken pip install blocks deploys) and
+   copilot-artifact exports (e.g. Genie result → xlsx).
+4. Small: ~~row-click chevrons~~ (shipped 2026-07-03) · ~~route tests~~ (shipped;
+   CI coverage gate still optional); model eval harness before swapping
+   `copilot_endpoint` to `databricks-claude-sonnet-5` in corporate;
+   builder filter UI (backend already accepts parameterized filters).
 
 **Blog**: Parts 1–6 drafted in `docs/blog/`, all `draft: true`, screenshot slots
 marked (1 build+CI/CD · 2 OData · 3 copilot · 4 MLflow tracing · 5 in-place AI ·
