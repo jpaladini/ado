@@ -391,3 +391,119 @@ async def test_non_tabular_tool_results_produce_no_tables(monkeypatch):
 
     out = await copilot.chat("home", "list items")
     assert out["tables"] == []
+
+
+# ---- _run_read_tool dispatch (fake clients, every branch) ---------------------------
+
+
+class _ReadFakeADO:
+    def __init__(self):
+        self.calls = []
+
+    def _rec(self, name, *a, **kw):
+        self.calls.append((name, a, kw))
+
+    async def pr_files(self, *a, **kw):
+        self._rec("pr_files", *a); return {"files": []}
+
+    async def pr_file_diff(self, *a, **kw):
+        self._rec("pr_file_diff", *a); return {"diff": "x" * 10, "addedLines": 1, "removedLines": 0}
+
+    async def list_pr_threads(self, *a, **kw):
+        self._rec("list_pr_threads", *a); return []
+
+    async def list_repos(self, *a, **kw):
+        self._rec("list_repos", *a)
+        return [{"id": "r1", "name": "ado", "defaultBranch": "dev"}]
+
+    async def get_file(self, *a, **kw):
+        self._rec("get_file", *a, **kw)
+        return {"path": "/f.py", "binary": False, "truncated": False,
+                "content": "\n".join(f"line{i}" for i in range(1, 21))}
+
+    async def list_work_items(self, *a, **kw):
+        self._rec("list_work_items", *a, **kw); return [{"id": 1}]
+
+    async def get_work_item(self, *a, **kw):
+        self._rec("get_work_item", *a); return {"id": a[0]}
+
+    async def list_work_item_comments(self, *a, **kw):
+        self._rec("comments", *a); return []
+
+    async def search_identities(self, *a, **kw):
+        self._rec("identities", *a); return []
+
+    async def list_pull_requests(self, *a, **kw):
+        self._rec("list_prs", *a, **kw); return []
+
+    async def list_builds(self, *a, **kw):
+        self._rec("builds", *a, **kw); return []
+
+
+@pytest.fixture
+def fake_ado(monkeypatch):
+    fake = _ReadFakeADO()
+    monkeypatch.setattr(copilot, "ADOClient", lambda: fake)
+    return fake
+
+
+@pytest.mark.asyncio
+async def test_read_tool_dispatch_covers_ado_tools(fake_ado):
+    r = await copilot._run_read_tool("list_work_items", {"top": 999}, "home")
+    assert r == [{"id": 1}]
+    assert fake_ado.calls[-1][2]["top"] == 200  # clamped
+
+    r = await copilot._run_read_tool("get_work_item", {"id": "7"}, "home")
+    assert r == {"id": 7}
+
+    await copilot._run_read_tool("list_pull_requests", {}, "home")
+    assert fake_ado.calls[-1][2]["status"] == "active"
+
+    await copilot._run_read_tool("list_builds", {}, "home")
+    await copilot._run_read_tool("list_work_item_comments", {"id": 3}, "home")
+    await copilot._run_read_tool("search_identities", {"query": "ja"}, "home")
+    await copilot._run_read_tool("list_pr_threads", {"repositoryId": "r1", "prId": 4}, "home")
+    await copilot._run_read_tool("list_pr_files", {"repositoryId": "r1", "prId": 4}, "home")
+    d = await copilot._run_read_tool("get_pr_file_diff",
+                                     {"repositoryId": "r1", "prId": 4, "path": "/f"}, "home")
+    assert "diff" in d
+
+    with pytest.raises(ValueError):
+        await copilot._run_read_tool("nope", {}, "home")
+
+
+@pytest.mark.asyncio
+async def test_get_file_resolves_default_branch_and_windows(fake_ado):
+    out = await copilot._run_read_tool(
+        "get_file", {"repositoryId": "ado", "path": "/f.py", "startLine": 5, "endLine": 7}, "home"
+    )
+    # branch was resolved from list_repos (dev), and the window is honored
+    assert any(c[0] == "list_repos" for c in fake_ado.calls)
+    assert out["lines"] == "5-7" and out["content"] == "line5\nline6\nline7"
+
+
+@pytest.mark.asyncio
+async def test_get_flow_metrics_business_days_and_percentiles(monkeypatch):
+    class _FakeAnalytics:
+        async def created_per_day(self, *a, **kw):
+            return [{"dateSK": 20260701, "count": 2}]
+
+        async def completed_per_day(self, *a, **kw):
+            return [{"dateSK": 20260702, "count": 1}]
+
+        async def cycle_time_items(self, *a, **kw):
+            return [{"id": 1, "title": "t", "type": "Issue", "cycleBdays": 2,
+                     "leadBdays": 3, "closedDate": "2026-07-02"}]
+
+        async def open_items_detail(self, *a, **kw):
+            return [{"id": 2, "title": "o", "type": "Issue", "state": "Doing",
+                     "category": "InProgress", "assignee": None,
+                     "ageBdays": 4, "ageDays": 6}]
+
+    monkeypatch.setattr(copilot, "AnalyticsClient", _FakeAnalytics)
+    out = await copilot._run_read_tool("get_flow_metrics", {"days": 300}, "home")
+    assert out["windowDays"] == 90  # clamped from 300
+    assert out["cycleTimeP50BusinessDays"] == 2
+    assert out["workloadByAssignee"] == {"Unassigned": 1}
+    assert out["oldestOpenItems"][0]["ageBusinessDays"] == 4
+    assert "business days" in out["note"]

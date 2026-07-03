@@ -133,9 +133,9 @@ API reads, Genie space creation) is allowed.
   Search extension — see AGENTS rule 11). Results deep-link: work item → edit
   drawer, code file → Code tab viewer (prefers `dev` branch). Planes fail
   independently; index is TTL-cached (300s), skips minified/lockfiles/binaries.
-- **Tests**: 116 pytest, ~73% line coverage (routes 64% after the TestClient route
-  suite in test_routes.py; exports 100%, codesearch 89%). No CI coverage gate yet.
-  Frontend has no automated tests (Playwright screenshots + live smokes per PR).
+- **Tests**: 148 pytest, ~83% line coverage (routes 79, copilot 79, store 84,
+  insights 81, exports 100, codesearch 89). No CI coverage gate yet. Frontend has
+  no automated tests (Playwright screenshots + live smokes per PR).
 
 **Next up (agreed order):**
 1. ~~4E report builder~~ **SHIPPED 2026-07-03**: metric view

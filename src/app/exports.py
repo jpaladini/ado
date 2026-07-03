@@ -115,10 +115,12 @@ def table_workbook(name: str, columns: list[str], rows: list[list[Any]]) -> byte
     """One-sheet workbook for arbitrary tabular data (copilot/Genie artifacts)."""
     from openpyxl import Workbook
 
+    # sheet titles reject \ / * ? : [ ] and empty — names come from user questions
+    title = "".join(c for c in (name or "") if c not in "\\/*?:[]")[:31].strip() or "data"
     wb = Workbook()
     wb.remove(wb.active)
     widths = [max(12, min(50, len(str(c)) + 4)) for c in columns]
-    _sheet(wb, (name or "data")[:31], columns, rows, widths)
+    _sheet(wb, title, columns, rows, widths)
     buf = BytesIO()
     wb.save(buf)
     return buf.getvalue()
