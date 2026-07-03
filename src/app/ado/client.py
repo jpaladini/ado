@@ -416,6 +416,144 @@ class ADOClient:
             "content": (content or "")[:MAX_FILE_CHARS],
         }
 
+    async def list_file_paths(self, project: str, repo_id: str, branch: str) -> list[str]:
+        """Every file path in a branch (recursionLevel=Full, folders excluded).
+        Used by the BFF code-search index — the org has no Code Search extension."""
+        proj, rid = quote(project, safe=""), quote(repo_id, safe="")
+        data = await self._get(
+            f"/{proj}/_apis/git/repositories/{rid}/items",
+            params={
+                "recursionLevel": "Full",
+                "versionDescriptor.version": branch,
+                "versionDescriptor.versionType": "branch",
+            },
+        )
+        return [
+            i["path"] for i in data.get("value", [])
+            if i.get("path") and not i.get("isFolder")
+        ]
+
+    async def get_files_bulk(
+        self, project: str, repo_id: str, branch: str, paths: list[str],
+        max_chars: int = 100_000, concurrency: int = 10,
+    ) -> dict[str, str]:
+        """Fetch many files' text content over one connection pool. Binary files
+        (no JSON content) and failures are skipped — search treats them as absent."""
+        import asyncio
+
+        proj, rid = quote(project, safe=""), quote(repo_id, safe="")
+        sem = asyncio.Semaphore(concurrency)
+        out: dict[str, str] = {}
+
+        async with self._client() as client:
+            async def fetch(path: str) -> None:
+                async with sem:
+                    try:
+                        resp = await client.get(
+                            f"/{proj}/_apis/git/repositories/{rid}/items",
+                            params={
+                                "api-version": API_VERSION,
+                                "path": path,
+                                "includeContent": "true",
+                                "$format": "json",
+                                "versionDescriptor.version": branch,
+                                "versionDescriptor.versionType": "branch",
+                            },
+                        )
+                        resp.raise_for_status()
+                        content = resp.json().get("content")
+                        if content is not None:
+                            out[path] = content[:max_chars]
+                    except (httpx.HTTPError, ValueError):
+                        pass  # unreadable file ≠ failed search
+
+            await asyncio.gather(*(fetch(p) for p in paths))
+        return out
+
+    # -- search -----------------------------------------------------------------
+
+    def _almsearch_root(self) -> str:
+        return self.org_url.replace("https://dev.azure.com", "https://almsearch.dev.azure.com")
+
+    async def search_work_items(self, project: str, query: str, top: int = 20) -> list[dict[str, Any]]:
+        """Work-item search via the ADO Search service (built into ADO Services),
+        falling back to WIQL CONTAINS when the search service is unreachable."""
+        try:
+            return await self._search_work_items_alm(project, query, top)
+        except httpx.HTTPError:
+            return await self._search_work_items_wiql(project, query, top)
+
+    async def _search_work_items_alm(self, project: str, query: str, top: int) -> list[dict[str, Any]]:
+        proj = quote(project, safe="")
+        async with httpx.AsyncClient(
+            base_url=self._almsearch_root(),
+            headers={"Authorization": _auth_header(self.pat), "Accept": "application/json"},
+            timeout=15.0,
+        ) as client:
+            resp = await client.post(
+                f"/{proj}/_apis/search/workitemsearchresults",
+                params={"api-version": API_VERSION},
+                json={"searchText": query, "$top": top},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+        out = []
+        for r in data.get("results", []):
+            f = r.get("fields", {})
+            # highlight hits: prefer a non-title field so the snippet adds context
+            snippet = None
+            for h in r.get("hits", []):
+                if h.get("fieldReferenceName") != "system.title" and h.get("highlights"):
+                    snippet = h["highlights"][0]
+                    break
+            if snippet is None:
+                for h in r.get("hits", []):
+                    if h.get("highlights"):
+                        snippet = h["highlights"][0]
+                        break
+            out.append(
+                {
+                    "id": int(f.get("system.id", 0)),
+                    "title": f.get("system.title", ""),
+                    "type": f.get("system.workitemtype", ""),
+                    "state": f.get("system.state", ""),
+                    "assignedTo": f.get("system.assignedto") or None,
+                    "snippet": (snippet or "").replace("<highlighthit>", "").replace(
+                        "</highlighthit>", ""
+                    ) or None,
+                }
+            )
+        return out
+
+    async def _search_work_items_wiql(self, project: str, query: str, top: int) -> list[dict[str, Any]]:
+        proj = quote(project, safe="")
+        q = query.replace("'", "''")
+        wiql = (
+            "SELECT [System.Id] FROM WorkItems WHERE "
+            f"([System.Title] CONTAINS '{q}' OR [System.Description] CONTAINS WORDS '{q}') "
+            "ORDER BY [System.ChangedDate] DESC"
+        )
+        data = await self._post(f"/{proj}/_apis/wit/wiql", {"query": wiql}, params={"$top": top})
+        ids = [w["id"] for w in data.get("workItems", [])][:top]
+        if not ids:
+            return []
+        fields = "System.Id,System.Title,System.WorkItemType,System.State,System.AssignedTo"
+        batch = await self._get(
+            "/_apis/wit/workitems",
+            params={"ids": ",".join(str(i) for i in ids), "fields": fields},
+        )
+        return [
+            {
+                "id": w["id"],
+                "title": w.get("fields", {}).get("System.Title", ""),
+                "type": w.get("fields", {}).get("System.WorkItemType", ""),
+                "state": w.get("fields", {}).get("System.State", ""),
+                "assignedTo": _user(w.get("fields", {}).get("System.AssignedTo")),
+                "snippet": None,
+            }
+            for w in batch.get("value", [])
+        ]
+
     # -- pull request review ------------------------------------------------------
 
     async def get_pull_request(self, project: str, repo_id: str, pr_id: int) -> dict[str, Any]:

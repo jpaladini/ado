@@ -5,7 +5,7 @@ import httpx
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
-from app import ai, copilot, genie, insights, reportbuilder
+from app import ai, codesearch, copilot, genie, insights, reportbuilder
 from app.ado.analytics import AnalyticsClient, OPEN_CATEGORIES
 from app.ado.client import ADOClient, ADOConfigError
 from app.config import settings
@@ -199,6 +199,39 @@ async def reports(
         "cfd": cfd_rows,
         "openItems": open_items,
     }
+
+
+# -- global search (work items + code) ---------------------------------------------
+
+
+@router.get("/projects/{project}/search")
+async def global_search(
+    project: str, q: str = Query(..., min_length=2), top: int = Query(20, le=50)
+) -> dict[str, object]:
+    """One round trip for the header search box: work items (ADO search service,
+    WIQL fallback) + code (BFF grep index — the org has no Code Search extension).
+    Each plane fails independently; the other still answers."""
+    import asyncio
+
+    query = q.strip()
+    if len(query) < 2:
+        raise HTTPException(status_code=422, detail="query too short")
+
+    try:
+        client = ADOClient()
+    except ADOConfigError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+
+    async def work_items() -> dict[str, object]:
+        try:
+            return {"available": True, "results": await client.search_work_items(project, query, top)}
+        except httpx.HTTPError as e:
+            return {"available": False, "reason": f"work-item search failed: {e}", "results": []}
+
+    wi, code = await asyncio.gather(
+        work_items(), codesearch.code_search.search(project, query, client)
+    )
+    return {"query": query, "workItems": wi, "code": code}
 
 
 # -- report builder (4E: UC metric view semantic layer) ---------------------------

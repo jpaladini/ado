@@ -291,6 +291,46 @@ export const fetchReports = (p: string, range: string, types: string[], assignee
       (assignees.length ? `&assignees=${enc(assignees.join(","))}` : ""),
   );
 
+// -- global search (work items + code) ---------------------------------------------
+
+export interface SearchWorkItem {
+  id: number;
+  title: string;
+  type: string;
+  state: string;
+  assignedTo: string | null;
+  snippet: string | null;
+}
+
+export interface SearchCodeMatch {
+  line: number;
+  text: string;
+}
+
+export interface SearchCodeFile {
+  repo: string;
+  repoId: string;
+  branch: string;
+  path: string;
+  nameHit: boolean;
+  matches: SearchCodeMatch[];
+}
+
+export interface SearchResponse {
+  query: string;
+  workItems: { available: boolean; reason?: string; results: SearchWorkItem[] };
+  code: {
+    available: boolean;
+    reason?: string;
+    results: SearchCodeFile[];
+    truncated?: boolean;
+    indexedFiles?: number;
+  };
+}
+
+export const globalSearch = (p: string, q: string) =>
+  get<SearchResponse>(`/api/projects/${enc(p)}/search?q=${enc(q)}`);
+
 // -- report builder (4E: UC metric-view semantic layer) ---------------------------
 
 export interface BuilderField {

@@ -32,12 +32,25 @@ const isNew = (s: string) => ["new", "to do"].includes((s ?? "").toLowerCase());
 type Filter = "All" | "Active" | "New" | "Mine";
 const FILTERS: Filter[] = ["All", "Active", "New", "Mine"];
 
-export default function WorkItems({ project, me }: { project: string; me: string | null }) {
+export default function WorkItems({
+  project,
+  me,
+  openTarget,
+}: {
+  project: string;
+  me: string | null;
+  openTarget?: { id: number } | null;
+}) {
   const q = useQuery({ queryKey: ["workitems", project], queryFn: () => fetchWorkItems(project) });
   const [filter, setFilter] = useState<Filter>("All");
   const [search, setSearch] = useState("");
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<number | null>(null);
+
+  // deep link from the header search — a fresh object per pick re-triggers this
+  useEffect(() => {
+    if (openTarget) setEditing(openTarget.id);
+  }, [openTarget]);
 
   const items = q.data?.value ?? [];
   const counts = useMemo(

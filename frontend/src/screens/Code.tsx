@@ -10,7 +10,13 @@ import { renderMarkdown } from "../lib/markdown";
 
 const DOTS = ["bg-accent", "bg-info", "bg-purple", "bg-ok", "bg-warn"];
 
-export default function Code({ project }: { project: string }) {
+export default function Code({
+  project,
+  fileTarget,
+}: {
+  project: string;
+  fileTarget?: { repoId: string; branch: string; path: string } | null;
+}) {
   const repos = useQuery({ queryKey: ["repos", project], queryFn: () => fetchRepos(project) });
   const [repoId, setRepoId] = useState<string | null>(null);
   const [branch, setBranch] = useState<string | null>(null);
@@ -19,6 +25,14 @@ export default function Code({ project }: { project: string }) {
   useEffect(() => {
     if (!repoId && repos.data?.value.length) setRepoId(repos.data.value[0].id);
   }, [repos.data, repoId]);
+
+  // deep link from the header search — a fresh object per pick re-triggers this
+  useEffect(() => {
+    if (!fileTarget) return;
+    setRepoId(fileTarget.repoId);
+    setBranch(fileTarget.branch);
+    setSelectedPath(fileTarget.path);
+  }, [fileTarget]);
 
   const commits = useQuery({
     queryKey: ["commits", project, repoId],

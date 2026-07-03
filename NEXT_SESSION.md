@@ -127,6 +127,12 @@ API reads, Genie space creation) is allowed.
   `PlotFigure` (re-renders on resize + theme flip).
 - **Observability**: every model call traced to experiment 3567576457281688 with token
   usage; every AI/mutating action in `workspace.ado_companion_app.audit_log`.
+- **Global search (2026-07-03)**: the header search box is real —
+  `GET /api/projects/{p}/search?q=` returns work items (almsearch service, WIQL
+  fallback) + code (BFF grep index in `app/codesearch.py`; the org has NO Code
+  Search extension — see AGENTS rule 11). Results deep-link: work item → edit
+  drawer, code file → Code tab viewer (prefers `dev` branch). Planes fail
+  independently; index is TTL-cached (300s), skips minified/lockfiles/binaries.
 - **Tests**: 88 pytest (19 new for the report builder), ~72% line coverage (client 92%, ai 83%; routes 56% — offered
   TestClient+CI-gate PR, not yet requested). Frontend has no automated tests
   (Playwright screenshots + live smokes per PR instead).

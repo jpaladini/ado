@@ -12,11 +12,11 @@ import {
   IconOverview,
   IconPipe,
   IconPrs,
-  IconSearch,
   IconSun,
   IconWork,
   Spark,
 } from "./icons";
+import SearchBox from "./SearchBox";
 import Overview from "../screens/Overview";
 import WorkItems from "../screens/WorkItems";
 import PullRequests from "../screens/PullRequests";
@@ -50,6 +50,10 @@ export default function Shell({
 }) {
   const [tab, setTab] = useState<Tab>("Overview");
   const { theme, toggle } = useTheme();
+
+  // search deep-links: fresh objects each pick, so screens re-open on repeat picks
+  const [wiTarget, setWiTarget] = useState<{ id: number } | null>(null);
+  const [fileTarget, setFileTarget] = useState<{ repoId: string; branch: string; path: string } | null>(null);
 
   // nav badge counts (shared cache with the screens — deduped by key)
   const wi = useQuery({ queryKey: ["workitems", project.name], queryFn: () => fetchWorkItems(project.name) });
@@ -150,12 +154,17 @@ export default function Shell({
             <span className="font-semibold text-text">{tab}</span>
           </div>
           <div className="flex items-center gap-[10px]">
-            <div className="flex h-[34px] w-[240px] items-center gap-2 rounded-[8px] border border-border bg-surface-2 px-[12px]">
-              <span className="text-faint">
-                <IconSearch size={14} />
-              </span>
-              <span className="text-[12.5px] text-faint">Search…</span>
-            </div>
+            <SearchBox
+              project={project.name}
+              onPickWorkItem={(id) => {
+                setWiTarget({ id });
+                setTab("Work Items");
+              }}
+              onPickCode={(f) => {
+                setFileTarget(f);
+                setTab("Code");
+              }}
+            />
             <button
               onClick={toggle}
               title="Toggle theme"
@@ -170,10 +179,10 @@ export default function Shell({
 
         <div className="flex-1 overflow-auto p-[22px_24px]">
           {tab === "Overview" && <Overview project={project.name} />}
-          {tab === "Work Items" && <WorkItems project={project.name} me={me} />}
+          {tab === "Work Items" && <WorkItems project={project.name} me={me} openTarget={wiTarget} />}
           {tab === "Pull Requests" && <PullRequests project={project.name} />}
           {tab === "Pipelines" && <Pipelines project={project.name} />}
-          {tab === "Code" && <Code project={project.name} />}
+          {tab === "Code" && <Code project={project.name} fileTarget={fileTarget} />}
           {tab === "Reports" && <Reports project={project.name} />}
           {tab === "AI" && <Copilot project={project.name} />}
         </div>

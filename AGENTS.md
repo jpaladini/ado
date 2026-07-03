@@ -358,3 +358,13 @@ missing/ungranted (by design, non-fatal).
    near-live (ADO Analytics OData), Genie is batch (Delta, refreshed by the ingest
    schedule or the Refresh button). Surface freshness in the UI; never imply Genie
    answers are real-time.
+11. **Search is two services with different availability.** Work-item search
+   (`almsearch.dev.azure.com …/workitemsearchresults`) is built into ADO Services and
+   just works (WIQL `CONTAINS` is the fallback). **Code search is a marketplace
+   extension (`ms.vss-code-search`) this org does NOT have** — `…/codesearchresults`
+   answers `count: 0, infoCode: 6` instead of erroring, which looks like "no matches".
+   The BFF therefore greps the repos itself (`app/codesearch.py`: TTL-cached index of
+   every text file on each repo's `dev`-or-default branch, minified/lockfile/binary
+   skip-lists, capped). If the extension is ever installed, swap the module — the
+   route contract stays. Note: this org's repos' *default* branch is a stale feature
+   branch; the index prefers `dev`. Consider fixing the default branch in ADO.
