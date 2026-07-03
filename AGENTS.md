@@ -400,3 +400,12 @@ rules, the deterministic-scorers-as-hard-gate decision rule, and the
 secret-swap step — is `evals/README.md`.** Start there when asked to run the
 Llama-vs-Claude comparison; it assumes no prior session context. (Genie is
 NL-to-SQL and cannot run it — an agent session or notebook does.)
+
+## Corporate bootstrap (first-time setup in a new workspace)
+
+`docs/CORPORATE_BOOTSTRAP.md` is the **pre-script**: it sequences everything in
+this file plus SETUP_DATABRICKS.md and docs/CICD.md into eight ordered phases
+(inputs → mirror/pipelines → secrets → first deploy → store → analytics/Genie
+→ copilot/tracing → model eval → sign-off), each with an AGENT/HUMAN marker and
+a verification gate. When asked to "set everything up" in a new workspace,
+start there and do not skip gates.
