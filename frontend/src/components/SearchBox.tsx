@@ -1,18 +1,20 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { globalSearch, type SearchCodeFile, type SearchWorkItem } from "../api";
+import { globalSearch, type PullRequest, type SearchCodeFile, type SearchWorkItem } from "../api";
 import { IconSearch } from "./icons";
-import { stateChip, typeDot } from "../lib/tokens";
+import { prChip, stateChip, typeDot } from "../lib/tokens";
 
 /** Header search: work items (ADO search service) + code (BFF grep index) in one
  * round trip. Picking a result deep-links into the Work Items or Code tab. */
 export default function SearchBox({
   project,
   onPickWorkItem,
+  onPickPr,
   onPickCode,
 }: {
   project: string;
   onPickWorkItem: (id: number) => void;
+  onPickPr: (pr: PullRequest) => void;
   onPickCode: (f: { repoId: string; branch: string; path: string }) => void;
 }) {
   const [q, setQ] = useState("");
@@ -58,6 +60,10 @@ export default function SearchBox({
     setOpen(false);
     onPickCode({ repoId: f.repoId, branch: f.branch, path: f.path });
   };
+  const pickPr = (pr: PullRequest) => {
+    setOpen(false);
+    onPickPr(pr);
+  };
 
   return (
     <div ref={boxRef} className="relative">
@@ -75,8 +81,10 @@ export default function SearchBox({
           onKeyDown={(e) => {
             if (e.key !== "Enter" || !d) return;
             const w = d.workItems.results[0];
+            const p = d.pullRequests?.results[0];
             const c = d.code.results[0];
             if (w) pickWi(w);
+            else if (p) pickPr(p);
             else if (c) pickCode(c);
           }}
           placeholder="Search work items & code…"
@@ -112,6 +120,30 @@ export default function SearchBox({
                   <span className="min-w-0 flex-1 truncate text-[12.5px] text-text">{w.title}</span>
                   <span className={`rounded-[7px] px-[7px] py-[2px] text-[10.5px] font-semibold ${stateChip(w.state)}`}>
                     {w.state}
+                  </span>
+                </button>
+              ))}
+
+              <SectionLabel>Pull requests</SectionLabel>
+              {!d.pullRequests?.available && (
+                <PanelNote>{d.pullRequests?.reason ?? "PR search unavailable."}</PanelNote>
+              )}
+              {d.pullRequests?.available && d.pullRequests.results.length === 0 && (
+                <PanelNote>No matching pull requests.</PanelNote>
+              )}
+              {(d.pullRequests?.results ?? []).map((pr) => (
+                <button
+                  key={pr.id}
+                  onClick={() => pickPr(pr)}
+                  className="flex w-full items-center gap-[8px] px-[14px] py-[7px] text-left hover:bg-hover"
+                >
+                  <span className="font-mono text-[11px] text-faint">!{pr.id}</span>
+                  <span className="min-w-0 flex-1 truncate text-[12.5px] text-text">{pr.title}</span>
+                  <span className="max-w-[160px] truncate font-mono text-[10.5px] text-faint">
+                    {pr.sourceRef} → {pr.targetRef}
+                  </span>
+                  <span className={`rounded-[7px] px-[7px] py-[2px] text-[10.5px] font-semibold ${prChip(pr.status, pr.isDraft)}`}>
+                    {pr.isDraft ? "draft" : pr.status}
                   </span>
                 </button>
               ))}

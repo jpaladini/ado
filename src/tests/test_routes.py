@@ -106,6 +106,11 @@ def test_search_planes_fail_independently(ado, monkeypatch):
 
     ado.search_work_items = wi_fails
 
+    async def prs_ok(project, query, top=10):
+        return [{"id": 9, "title": "genie fix", "status": "active", "isDraft": False}]
+
+    ado.search_pull_requests = prs_ok
+
     async def code_ok(project, query, c):
         return {"available": True, "results": [], "indexedFiles": 5}
 
@@ -114,6 +119,8 @@ def test_search_planes_fail_independently(ado, monkeypatch):
     assert r.status_code == 200
     d = r.json()
     assert d["workItems"]["available"] is False
+    assert d["pullRequests"]["available"] is True
+    assert d["pullRequests"]["results"][0]["id"] == 9
     assert d["code"]["available"] is True
 
 

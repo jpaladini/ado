@@ -256,10 +256,16 @@ async def global_search(
         except httpx.HTTPError as e:
             return {"available": False, "reason": f"work-item search failed: {e}", "results": []}
 
-    wi, code = await asyncio.gather(
-        work_items(), codesearch.code_search.search(project, query, client)
+    async def pull_requests() -> dict[str, object]:
+        try:
+            return {"available": True, "results": await client.search_pull_requests(project, query)}
+        except httpx.HTTPError as e:
+            return {"available": False, "reason": f"PR search failed: {e}", "results": []}
+
+    wi, prs, code = await asyncio.gather(
+        work_items(), pull_requests(), codesearch.code_search.search(project, query, client)
     )
-    return {"query": query, "workItems": wi, "code": code}
+    return {"query": query, "workItems": wi, "pullRequests": prs, "code": code}
 
 
 # -- report builder (4E: UC metric view semantic layer) ---------------------------

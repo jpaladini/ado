@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import type { Project } from "../api";
+import type { Project, PullRequest } from "../api";
 import { fetchPullRequests, fetchWorkItems } from "../api";
 import { useTheme } from "../lib/theme";
 import {
@@ -53,6 +53,7 @@ export default function Shell({
 
   // search deep-links: fresh objects each pick, so screens re-open on repeat picks
   const [wiTarget, setWiTarget] = useState<{ id: number } | null>(null);
+  const [prTarget, setPrTarget] = useState<PullRequest | null>(null);
   const [fileTarget, setFileTarget] = useState<{ repoId: string; branch: string; path: string } | null>(null);
 
   // nav badge counts (shared cache with the screens — deduped by key)
@@ -160,6 +161,10 @@ export default function Shell({
                 setWiTarget({ id });
                 setTab("Work Items");
               }}
+              onPickPr={(pr) => {
+                setPrTarget({ ...pr });
+                setTab("Pull Requests");
+              }}
               onPickCode={(f) => {
                 setFileTarget(f);
                 setTab("Code");
@@ -180,7 +185,7 @@ export default function Shell({
         <div className="flex-1 overflow-auto p-[22px_24px]">
           {tab === "Overview" && <Overview project={project.name} />}
           {tab === "Work Items" && <WorkItems project={project.name} me={me} openTarget={wiTarget} />}
-          {tab === "Pull Requests" && <PullRequests project={project.name} />}
+          {tab === "Pull Requests" && <PullRequests project={project.name} openTarget={prTarget} />}
           {tab === "Pipelines" && <Pipelines project={project.name} />}
           {tab === "Code" && <Code project={project.name} fileTarget={fileTarget} />}
           {tab === "Reports" && <Reports project={project.name} />}

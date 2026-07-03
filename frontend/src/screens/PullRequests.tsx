@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   createPrThread,
@@ -22,10 +22,25 @@ import { useToast } from "../components/Toast";
 const STATUSES = ["active", "completed", "abandoned"] as const;
 type Status = (typeof STATUSES)[number];
 
-export default function PullRequests({ project }: { project: string }) {
+export default function PullRequests({
+  project,
+  openTarget,
+}: {
+  project: string;
+  openTarget?: PullRequest | null;
+}) {
   const [status, setStatus] = useState<Status>("active");
   const [approved, setApproved] = useState<Set<number>>(new Set());
   const [openPr, setOpenPr] = useState<PullRequest | null>(null);
+
+  // deep link from the header search — a fresh object per pick re-triggers this;
+  // the search result row is the same shape the list renders, so it drives the
+  // drawer directly and the status filter follows it
+  useEffect(() => {
+    if (!openTarget) return;
+    if (STATUSES.includes(openTarget.status as Status)) setStatus(openTarget.status as Status);
+    setOpenPr(openTarget);
+  }, [openTarget]);
 
   // one query per status → gives us list + chip counts together
   const results = useQueries({

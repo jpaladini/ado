@@ -472,6 +472,34 @@ class ADOClient:
 
     # -- search -----------------------------------------------------------------
 
+    async def search_pull_requests(self, project: str, query: str, top: int = 10) -> list[dict[str, Any]]:
+        """Substring search over recent PRs (active + completed). ADO's search
+        service doesn't cover PRs, and the org's PR volume is list-then-filter
+        scale — the result rows are the same shape the PR tab renders, so the
+        UI can deep-link into the existing drawer."""
+        import asyncio
+
+        active, completed = await asyncio.gather(
+            self.list_pull_requests(project, status="active", top=50),
+            self.list_pull_requests(project, status="completed", top=25),
+        )
+        q = query.lower()
+        seen: set[int] = set()
+        out = []
+        for pr in [*active, *completed]:
+            if pr["id"] in seen:
+                continue
+            hay = " ".join(
+                str(pr.get(k) or "")
+                for k in ("title", "sourceRef", "targetRef", "createdBy", "repository")
+            ).lower()
+            if f"!{pr['id']}" == q or str(pr["id"]) == q or q in hay:
+                seen.add(pr["id"])
+                out.append(pr)
+                if len(out) >= top:
+                    break
+        return out
+
     def _almsearch_root(self) -> str:
         return self.org_url.replace("https://dev.azure.com", "https://almsearch.dev.azure.com")
 

@@ -347,6 +347,7 @@ export interface SearchCodeFile {
 export interface SearchResponse {
   query: string;
   workItems: { available: boolean; reason?: string; results: SearchWorkItem[] };
+  pullRequests: { available: boolean; reason?: string; results: PullRequest[] };
   code: {
     available: boolean;
     reason?: string;

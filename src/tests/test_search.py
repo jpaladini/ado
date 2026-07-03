@@ -58,6 +58,40 @@ async def test_wiql_search_escapes_quotes_and_maps_fields(monkeypatch):
                     "state": "Active", "assignedTo": "Ada", "snippet": None}]
 
 
+@pytest.mark.asyncio
+async def test_search_pull_requests_filters_and_dedupes(monkeypatch):
+    c = _client()
+    active = [
+        {"id": 22, "title": "Global search", "sourceRef": "claude/x", "targetRef": "dev",
+         "createdBy": "Jason", "repository": "ado", "status": "active", "isDraft": False},
+        {"id": 30, "title": "Unrelated", "sourceRef": "f", "targetRef": "dev",
+         "createdBy": "Ada", "repository": "ado", "status": "active", "isDraft": False},
+    ]
+    completed = [
+        {"id": 21, "title": "4E report builder", "sourceRef": "claude/x", "targetRef": "dev",
+         "createdBy": "Jason", "repository": "ado", "status": "completed", "isDraft": False},
+        {"id": 22, "title": "Global search", "sourceRef": "claude/x", "targetRef": "dev",
+         "createdBy": "Jason", "repository": "ado", "status": "active", "isDraft": False},
+    ]
+
+    async def fake_list(project, status="active", top=50):
+        return active if status == "active" else completed
+
+    monkeypatch.setattr(c, "list_pull_requests", fake_list)
+
+    out = await c.search_pull_requests("Demo", "search")
+    assert [p["id"] for p in out] == [22]  # matched once, deduped across statuses
+
+    out = await c.search_pull_requests("Demo", "builder")
+    assert [p["id"] for p in out] == [21]  # completed PRs searchable too
+
+    out = await c.search_pull_requests("Demo", "!30")
+    assert [p["id"] for p in out] == [30]  # !id lookup
+
+    out = await c.search_pull_requests("Demo", "jason")
+    assert {p["id"] for p in out} == {22, 21}  # author match, case-insensitive (30 is Ada's)
+
+
 # ---- code index filters -------------------------------------------------------------
 
 
