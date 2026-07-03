@@ -14,6 +14,7 @@ export interface Health {
 }
 
 export interface CopilotToolCall {
+  error?: boolean;
   name: string;
   args: Record<string, unknown>;
 }

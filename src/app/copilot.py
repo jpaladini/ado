@@ -254,6 +254,13 @@ READ_TOOLS: list[dict[str, Any]] = [
         {"query": {"type": "string", "description": "Substring to find (case-insensitive)."}},
         ["query"],
     ),
+    _schema(
+        "list_repos",
+        "List the project's git repositories with their ids and default branches. "
+        "Use this to get the repositoryId for get_file and create_code_pr.",
+        {},
+        [],
+    ),
 ]
 
 WRITE_TOOLS: list[dict[str, Any]] = [
@@ -446,6 +453,8 @@ async def _run_read_tool(name: str, args: dict[str, Any], project: str) -> Any:
             "indexedFiles": out.get("indexedFiles"),
         }
     c = ADOClient()
+    if name == "list_repos":
+        return await c.list_repos(project)
     if name == "list_pr_files":
         return await c.pr_files(project, str(args["repositoryId"]), int(args["prId"]))
     if name == "get_pr_file_diff":
@@ -509,12 +518,16 @@ Rules:
 - Two data planes: read tools are LIVE; query_analytics_history is BATCH (Delta,
   refreshed daily). Use it for trends/history and say so when you do — never present
   batch numbers as real-time.
-- Code changes: search_code to locate the right files, get_file to read the CURRENT
-  content, then ONE create_code_pr proposal with the COMPLETE new content of each
-  changed file (never fragments — anything you omit is deleted). Base on and target
-  the repo's working branch (usually dev). Applying creates a branch + PR that CI
-  validates and a human reviews — never claim the change is merged or live; the PR
+- Code changes: list_repos or search_code to find the repositoryId, get_file to read
+  the CURRENT content, then ONE create_code_pr proposal with the COMPLETE new content
+  of each changed file (never fragments — anything you omit is deleted). Base on and
+  target the repo's working branch (usually dev). Applying creates a branch + PR that
+  CI validates and a human reviews — never claim the change is merged or live; the PR
   is the deliverable. Keep changes small: one concern per PR, max a handful of files.
+- A proposal EXISTS only if you called the write tool in THIS conversation and its
+  result said "proposed". Never tell the user a proposal or PR exists otherwise — if
+  you described a change but have not called the tool yet, call it now. Never ask the
+  user for repository ids or other lookups your read tools can answer.
 - Be concise. Answer in plain sentences; no markdown headers.
 """
 
@@ -708,10 +721,29 @@ async def chat(project: str, message: str, history: list[dict[str, str]] | None 
             for tc in tcs:
                 fn = tc.get("function") or {}
                 name = fn.get("name") or ""
+                args_malformed = False
                 try:
                     args = json.loads(fn.get("arguments") or "{}")
                 except json.JSONDecodeError:
-                    args = {}
+                    # Models fumble JSON escaping on big multiline payloads
+                    # (file contents especially). Say so precisely — the generic
+                    # missing-field error sent them into apology spirals.
+                    args, args_malformed = {}, True
+
+                if args_malformed:
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tc.get("id") or name,
+                        "name": name,
+                        "content": json.dumps({
+                            "error": f"Your {name} arguments were NOT valid JSON, so the call "
+                                     "was dropped. Re-send the SAME call with valid JSON — "
+                                     "escape newlines in file content as \\n and double-quotes "
+                                     'as \\". Do not write the proposal as plain text.'
+                        }),
+                    })
+                    tool_calls_made.append({"name": name, "args": {}, "error": True})
+                    continue
 
                 if name in WRITE_TOOL_NAMES:
                     with _span(f"verify:{name}") as vs:
@@ -739,7 +771,10 @@ async def chat(project: str, message: str, history: list[dict[str, str]] | None 
                             result = {"error": f"{type(e).__name__}: {e}"}
                         if ts:
                             ts.set_outputs({"result": str(result)[:500]})
-                    tool_calls_made.append({"name": name, "args": args})
+                    failed = isinstance(result, dict) and bool(result.get("error"))
+                    tool_calls_made.append(
+                        {"name": name, "args": args, **({"error": True} if failed else {})}
+                    )
                     # Tabular Genie answers become downloadable artifacts in the UI.
                     if (
                         name == "query_analytics_history"

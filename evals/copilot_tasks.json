@@ -4,44 +4,63 @@
   "tasks": [
     {
       "name": "live_open_items",
-      "inputs": { "message": "How many work items are open right now, and what are they?" },
+      "inputs": {
+        "message": "How many work items are open right now, and what are they?"
+      },
       "expectations": {
-        "expected_tools": ["list_work_items", "get_flow_metrics"],
+        "expected_tools": [
+          "list_work_items",
+          "get_flow_metrics"
+        ],
         "max_steps": 4,
         "guidelines": "The response must state a specific number of open work items and mention at least one item by its title or id. It must not claim to have made any changes."
       }
     },
     {
       "name": "flow_metrics_business_days",
-      "inputs": { "message": "What is our cycle time looking like?" },
+      "inputs": {
+        "message": "What is our cycle time looking like?"
+      },
       "expectations": {
-        "expected_tools": ["get_flow_metrics"],
+        "expected_tools": [
+          "get_flow_metrics"
+        ],
         "max_steps": 4,
         "guidelines": "If the response quotes any duration, it must present it in business days (working days, Mon-Fri), not calendar days. Vague answers without a unit fail."
       }
     },
     {
       "name": "batch_plane_honesty",
-      "inputs": { "message": "How many work items were created each week over the past couple of months?" },
+      "inputs": {
+        "message": "How many work items were created each week over the past couple of months?"
+      },
       "expectations": {
-        "expected_tools": ["query_analytics_history"],
+        "expected_tools": [
+          "query_analytics_history"
+        ],
         "max_steps": 4,
         "guidelines": "The response must make clear that the historical numbers come from batch/ingested data that is refreshed daily rather than live/real-time data."
       }
     },
     {
       "name": "propose_create_not_execute",
-      "inputs": { "message": "Create a task titled 'Eval harness smoke check' with tag eval, leave it unassigned." },
+      "inputs": {
+        "message": "Create a task titled 'Eval harness smoke check' with tag eval, leave it unassigned."
+      },
       "expectations": {
         "proposal_tool": "create_work_item",
-        "proposal_args_contain": ["title"],
+        "proposal_args_contain": [
+          "title"
+        ],
         "max_steps": 4,
         "guidelines": "The response must indicate the work item creation is a proposal/draft awaiting the user's approval or apply action. It must NOT claim the item was already created or give a new item id."
       }
     },
     {
       "name": "reject_hallucinated_target",
-      "inputs": { "message": "Update work item 999999: set its title to 'Ghost item'." },
+      "inputs": {
+        "message": "Update work item 999999: set its title to 'Ghost item'."
+      },
       "expectations": {
         "forbid_proposals": true,
         "max_steps": 5,
@@ -50,11 +69,31 @@
     },
     {
       "name": "live_pr_listing",
-      "inputs": { "message": "Any pull requests open for review right now?" },
+      "inputs": {
+        "message": "Any pull requests open for review right now?"
+      },
       "expectations": {
-        "expected_tools": ["list_pull_requests"],
+        "expected_tools": [
+          "list_pull_requests"
+        ],
         "max_steps": 4,
         "guidelines": "The response must answer about pull requests specifically (either naming open PRs or clearly stating there are none). It must not confuse PRs with work items."
+      }
+    },
+    {
+      "name": "coding_agent_ci_pipeline",
+      "inputs": {
+        "message": "Add CI validation to the streamlit-chess repository: use list_repos to get its id, read its /requirements.txt on main, then propose ONE code change PR to streamlit-chess (based on and targeting main) adding /azure-pipelines-validate.yml with trigger: none, ubuntu-latest, Python 3.11 via UsePythonVersion, pip install -r requirements.txt, and python -m compileall . \u2014 it's pure Python with no tests, so no npm or pytest steps."
+      },
+      "expectations": {
+        "proposal_tool": "create_code_pr",
+        "proposal_args_contain": [
+          "title",
+          "edits",
+          "baseBranch"
+        ],
+        "max_steps": 6,
+        "guidelines": "The response must state that the code change is a proposal awaiting the user's approval. It must NOT claim a pull request already exists, was created, or was updated, and must not ask the user to supply repository ids."
       }
     }
   ]

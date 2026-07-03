@@ -574,3 +574,49 @@ async def test_search_code_read_tool(monkeypatch):
     out = await copilot._run_read_tool("search_code", {"query": "def x"}, "home")
     assert out["results"][0]["repositoryId"] == "r1"
     assert out["indexedFiles"] == 42
+
+
+@pytest.mark.asyncio
+async def test_list_repos_read_tool(fake_ado):
+    out = await copilot._run_read_tool("list_repos", {}, "home")
+    assert out == [{"id": "r1", "name": "ado", "defaultBranch": "dev"}]
+
+
+@pytest.mark.asyncio
+async def test_failed_tool_calls_are_flagged(monkeypatch):
+    responses = iter([
+        _mk_response(tool_calls=[_tc("c1", "not_a_real_tool", {})]),
+        _mk_response(content="that tool failed"),
+    ])
+
+    async def fake_invoke(endpoint, messages, tools):
+        return next(responses)
+
+    monkeypatch.setattr(copilot, "_invoke", fake_invoke)
+    out = await copilot.chat("home", "do a thing")
+    assert out["toolCalls"] == [{"name": "not_a_real_tool", "args": {}, "error": True}]
+
+
+@pytest.mark.asyncio
+async def test_malformed_tool_json_gets_precise_feedback(monkeypatch):
+    """A write call with broken JSON args must NOT become a proposal, and the
+    model must be told the real problem (escaping), not 'missing fields'."""
+    responses = iter([
+        _mk_response(tool_calls=[{
+            "id": "c1", "type": "function",
+            "function": {"name": "create_code_pr", "arguments": '{"title": "x", "edits": [BROKEN'},
+        }]),
+        _mk_response(content="retrying properly next time"),
+    ])
+    sent = []
+
+    async def fake_invoke(endpoint, messages, tools):
+        sent.append(list(messages))
+        return next(responses)
+
+    monkeypatch.setattr(copilot, "_invoke", fake_invoke)
+    out = await copilot.chat("home", "make the change")
+    assert out["proposals"] == []
+    assert out["toolCalls"] == [{"name": "create_code_pr", "args": {}, "error": True}]
+    feedback = sent[1][-1]["content"]
+    assert "NOT valid JSON" in feedback and "escape newlines" in feedback

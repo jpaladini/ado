@@ -316,8 +316,14 @@ function AnswerView({
       {a.toolCalls.length > 0 && (
         <div className="flex flex-wrap gap-[5px]">
           {a.toolCalls.map((t, i) => (
-            <span key={i} className="rounded-[5px] bg-nbg px-[7px] py-[2px] font-mono text-[10.5px] text-nfg" title={JSON.stringify(t.args)}>
-              read: {t.name}
+            <span
+              key={i}
+              className={`rounded-[5px] px-[7px] py-[2px] font-mono text-[10.5px] ${
+                t.error ? "bg-danger-bg text-danger" : "bg-nbg text-nfg"
+              }`}
+              title={t.error ? `FAILED — ${JSON.stringify(t.args)}` : JSON.stringify(t.args)}
+            >
+              {t.error ? "failed" : "read"}: {t.name}
             </span>
           ))}
         </div>
