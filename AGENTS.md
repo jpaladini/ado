@@ -394,3 +394,9 @@ the script forces `mlflow.set_tracking_uri("databricks")` (local sqlite configs
 otherwise hijack it); baseline 2026-07-03 (llama, self-judged): all scorers 1.0,
 latency mean ~7s / p90 ~12s — the suite should grow harder tasks as regressions
 appear. Keep tasks value-agnostic (no assertions on data that drifts).
+
+**The full corporate runbook — ready-to-paste notebook cells, judge-pinning
+rules, the deterministic-scorers-as-hard-gate decision rule, and the
+secret-swap step — is `evals/README.md`.** Start there when asked to run the
+Llama-vs-Claude comparison; it assumes no prior session context. (Genie is
+NL-to-SQL and cannot run it — an agent session or notebook does.)

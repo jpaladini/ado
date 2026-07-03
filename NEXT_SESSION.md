@@ -168,9 +168,9 @@ API reads, Genie space creation) is allowed.
    Remaining small: CI coverage gate (optional); grow the eval suite; corporate
    run vs `databricks-claude-sonnet-5` with a pinned judge.
 
-**Blog**: Parts 1–6 drafted in `docs/blog/`, all `draft: true`, screenshot slots
+**Blog**: Parts 1–7 drafted in `docs/blog/`, all `draft: true`, screenshot slots
 marked (1 build+CI/CD · 2 OData · 3 copilot · 4 MLflow tracing · 5 in-place AI ·
-6 flow metrics/business days/Plot). `WEBSITE_HANDOFF.md` = self-contained publishing
+6 flow metrics/business days/Plot · 7 search/artifacts/eval harness). `WEBSITE_HANDOFF.md` = self-contained publishing
 instructions for Jason's website agent (Astro + Tailwind site, minimalist B&W,
 jpaladini.vercel.app, no blog section yet). Jason has the handoff files in chat too.
 

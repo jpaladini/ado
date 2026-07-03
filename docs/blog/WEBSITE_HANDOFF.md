@@ -10,14 +10,14 @@
 ## The task
 
 Add a **blog section** to the site (it currently has none — About / Experience /
-Platforms & Tools / What I Do / Education / Contact) and publish a **six-part** technical
+Platforms & Tools / What I Do / Education / Contact) and publish a **seven-part** technical
 series called **"Building ADO Companion."** The posts are finished drafts written in
 Jason's voice; your job is presentation and plumbing, **not rewriting**. Format-level
 edits only. You MAY write short *around-the-posts* copy (index blurbs, a one-paragraph
 series intro, meta descriptions) — ground every claim in the appendix below, and keep
 Jason's direct, results-oriented voice.
 
-## The source files (4 posts + 2 images)
+## The source files (7 posts + 2 images)
 
 | File | Series part | Status |
 |---|---|---|
@@ -27,6 +27,7 @@ Jason's direct, results-oriented voice.
 | `part-4-mlflow-tracing-agent.md` | 4 — MLflow tracing | draft, complete |
 | `part-5-ai-in-the-flow-of-work.md` | 5 — in-place AI (enrichment, PR review, Explain) | draft, complete |
 | `part-6-flow-metrics-business-days.md` | 6 — Reports tab, business days, Observable Plot | draft, complete |
+| `part-7-search-artifacts-eval-harness.md` | 7 — global search, artifacts/exports, model eval harness | draft, complete |
 | `analytics-overview-light.png`, `analytics-overview-30d.png` | used by Part 2 | final |
 
 Canonical source of truth: the `docs/blog/` folder of Jason's `ado` repo (branch `dev`).
@@ -184,6 +185,7 @@ committed, so deploys need no Node toolchain.
 | 4 | You can't operate an agent you can't see: MLflow Tracing from day one | Span tree = turn/llm/tool/verify; never-fatal telemetry rule; two ten-second production diagnoses |
 | 5 | Chat proved the AI; buttons shipped it | Form-as-approval-UX; PR review line anchors validated server-side (hallucinated anchors structurally impossible); Explain for non-engineers |
 | 6 | Flow metrics for a data team, in business days, drawn with d3's successor | p50/p85 over averages; aging-WIP-vs-p85; retired a custom Power BI semantic model with a 20-line tested function; Observable Plot (ISC, offline, token-themed); Databricks metric views verified as the future report-builder's semantic layer |
+| 7 | The search box was a div; and an eval harness so the model swap isn't vibes | global search over 3 planes (BFF grep — org lacks the Code Search extension, API fails silently with infoCode 6); session history persists proposal outcomes; fpdf2 over weasyprint (deploy failure mode); mlflow.genai.evaluate + judges, deterministic scorers as hard gate, one pinned judge |
 
 ## A6. Glossary (terms the posts assume)
 
