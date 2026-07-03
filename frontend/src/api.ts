@@ -291,6 +291,34 @@ export const fetchReports = (p: string, range: string, types: string[], assignee
       (assignees.length ? `&assignees=${enc(assignees.join(","))}` : ""),
   );
 
+// -- copilot session history --------------------------------------------------------
+
+export interface CopilotSessionMeta {
+  id: string;
+  title: string;
+  updatedAt: string;
+}
+
+export interface CopilotSessionDetail {
+  id: string;
+  project: string;
+  title: string;
+  state: { turns?: unknown[]; outcomes?: Record<string, string> };
+}
+
+export const fetchCopilotSessions = (project: string) =>
+  get<{ value: CopilotSessionMeta[] }>(`/api/copilot/sessions?project=${enc(project)}`);
+export const fetchCopilotSession = (id: string) =>
+  get<CopilotSessionDetail>(`/api/copilot/sessions/${enc(id)}`);
+export const saveCopilotSession = (body: {
+  id?: string;
+  project: string;
+  title?: string;
+  state: { turns: unknown[]; outcomes: Record<string, string> };
+}) => send<{ id: string; title: string }>("/api/copilot/sessions", "PUT", body);
+export const deleteCopilotSession = (id: string) =>
+  send<{ ok: boolean }>(`/api/copilot/sessions/${enc(id)}`, "DELETE");
+
 // -- global search (work items + code) ---------------------------------------------
 
 export interface SearchWorkItem {

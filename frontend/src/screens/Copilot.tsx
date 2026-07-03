@@ -1,11 +1,15 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   addWorkItemComment,
   askCopilot,
   createPrThread,
   createWorkItem,
+  deleteCopilotSession,
+  fetchCopilotSession,
+  fetchCopilotSessions,
   fetchHealth,
+  saveCopilotSession,
   updateWorkItem,
   type CopilotProposal,
   type CopilotReply,
@@ -33,12 +37,70 @@ const SUGGESTIONS = [
 
 export default function Copilot({ project }: { project: string }) {
   const health = useQuery({ queryKey: ["health"], queryFn: fetchHealth });
+  const qc = useQueryClient();
   const [turns, setTurns] = useState<Turn[]>([]);
   // Proposal outcomes ("applied" | "dismissed" | "failed: …"), keyed turnIdx:proposalId.
   // Fed back into the next turn's history so the model knows what actually happened.
   const [outcomes, setOutcomes] = useState<Record<string, string>>({});
   const [question, setQuestion] = useState("");
   const endRef = useRef<HTMLDivElement>(null);
+
+  // -- session history: autosave after answered turns, restore on pick ------------
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const sessions = useQuery({
+    queryKey: ["copilot-sessions", project],
+    queryFn: () => fetchCopilotSessions(project),
+    staleTime: 30_000,
+  });
+
+  const answeredTurns = turns.filter((t) => t.answer);
+  useEffect(() => {
+    if (!answeredTurns.length) return;
+    const t = setTimeout(async () => {
+      try {
+        const saved = await saveCopilotSession({
+          id: sessionId ?? undefined,
+          project,
+          title: turns[0]?.question.slice(0, 80),
+          state: { turns: answeredTurns, outcomes },
+        });
+        if (saved.id !== sessionId) setSessionId(saved.id);
+        qc.invalidateQueries({ queryKey: ["copilot-sessions", project] });
+      } catch {
+        // store unavailable — chat still works, it just won't persist
+      }
+    }, 800);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [answeredTurns.length, outcomes]);
+
+  const restore = async (id: string) => {
+    try {
+      const s = await fetchCopilotSession(id);
+      setSessionId(s.id);
+      setTurns((s.state.turns as Turn[]) ?? []);
+      setOutcomes(s.state.outcomes ?? {});
+      setTimeout(() => endRef.current?.scrollIntoView(), 50);
+    } catch {
+      /* stay on the current chat */
+    }
+  };
+
+  const newChat = () => {
+    setSessionId(null);
+    setTurns([]);
+    setOutcomes({});
+  };
+
+  const removeSession = async (id: string) => {
+    try {
+      await deleteCopilotSession(id);
+      qc.invalidateQueries({ queryKey: ["copilot-sessions", project] });
+      if (id === sessionId) newChat();
+    } catch {
+      /* leave the list as is */
+    }
+  };
 
   const outcomeNote = (t: Turn, i: number) => {
     const ps = t.answer?.proposals ?? [];
@@ -83,6 +145,43 @@ export default function Copilot({ project }: { project: string }) {
         comes back as a proposal you apply.
       </p>
       <FreshnessBar />
+
+      {/* -------- session history bar -------- */}
+      {((sessions.data?.value ?? []).length > 0 || turns.length > 0) && (
+        <div className="mt-[10px] flex flex-wrap items-center gap-[6px]">
+          <button
+            onClick={newChat}
+            className={`rounded-[7px] border px-[10px] py-[4px] text-[11.5px] ${
+              sessionId === null && turns.length === 0
+                ? "border-ink-bg bg-ink-bg font-semibold text-ink-fg"
+                : "border-border bg-surface font-medium text-text-3 hover:border-faint"
+            }`}
+          >
+            + New chat
+          </button>
+          {(sessions.data?.value ?? []).slice(0, 8).map((s) => (
+            <span
+              key={s.id}
+              className={`group flex items-center gap-[6px] rounded-[7px] border px-[10px] py-[4px] text-[11.5px] ${
+                s.id === sessionId
+                  ? "border-ink-bg bg-ink-bg font-semibold text-ink-fg"
+                  : "border-border bg-surface font-medium text-text-3 hover:border-faint"
+              }`}
+            >
+              <button onClick={() => restore(s.id)} className="max-w-[180px] truncate" title={s.title}>
+                {s.title}
+              </button>
+              <button
+                onClick={() => removeSession(s.id)}
+                title="Delete this chat"
+                className={`${s.id === sessionId ? "text-ink-fg" : "text-faint"} opacity-40 hover:opacity-100`}
+              >
+                ×
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
 
       {turns.length === 0 && (
         <div className="mt-6 grid grid-cols-2 gap-2">

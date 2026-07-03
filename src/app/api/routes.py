@@ -467,6 +467,64 @@ async def copilot_chat(body: CopilotBody) -> dict[str, object]:
         raise HTTPException(status_code=502, detail="Could not reach the model endpoint")
 
 
+# -- copilot session history (per-user chat state in the app-state store) ----------
+
+
+MAX_SESSION_STATE_CHARS = 400_000
+
+
+class SessionSaveBody(BaseModel):
+    id: str | None = None
+    project: str
+    title: str | None = None
+    state: dict  # opaque chat state: {turns: [...], outcomes: {...}} — the UI owns the shape
+
+
+@router.get("/copilot/sessions")
+async def copilot_sessions(request: Request, project: str = Query(...)) -> dict[str, object]:
+    return {"value": await store.list_sessions(user_email(request), project)}
+
+
+@router.get("/copilot/sessions/{session_id}")
+async def copilot_session_detail(request: Request, session_id: str) -> dict[str, object]:
+    import json
+
+    s = await store.get_session(user_email(request), session_id)
+    if s is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    try:
+        s["state"] = json.loads(s["state"] or "{}")
+    except ValueError:
+        s["state"] = {}
+    return s
+
+
+@router.put("/copilot/sessions")
+async def copilot_session_save(request: Request, body: SessionSaveBody) -> dict[str, object]:
+    import json
+    import uuid
+
+    state = json.dumps(body.state)
+    if len(state) > MAX_SESSION_STATE_CHARS:
+        raise HTTPException(status_code=413, detail="session too large to save")
+    session_id = (body.id or "").strip() or uuid.uuid4().hex[:12]
+    title = (body.title or "").strip()[:80] or "Untitled chat"
+    try:
+        await store.save_session(user_email(request), session_id, body.project, title, state)
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e)[:300])
+    return {"id": session_id, "title": title}
+
+
+@router.delete("/copilot/sessions/{session_id}")
+async def copilot_session_delete(request: Request, session_id: str) -> dict[str, object]:
+    try:
+        await store.delete_session(user_email(request), session_id)
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e)[:300])
+    return {"ok": True}
+
+
 class SuggestBody(BaseModel):
     project: str
     type: str | None = None

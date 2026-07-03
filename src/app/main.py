@@ -23,6 +23,8 @@ _ACTIONS = [
     (re.compile(r"/pullrequests/\d+$"), "PATCH", "pr.status"),
     (re.compile(r"^/api/genie/ask$"), "POST", "genie.ask"),
     (re.compile(r"^/api/copilot/chat$"), "POST", "copilot.chat"),
+    (re.compile(r"^/api/copilot/sessions$"), "PUT", "copilot.session.save"),
+    (re.compile(r"^/api/copilot/sessions/[^/]+$"), "DELETE", "copilot.session.delete"),
     (re.compile(r"^/api/ai/suggest-workitem$"), "POST", "ai.suggest"),
     (re.compile(r"^/api/ai/review-pr$"), "POST", "ai.review"),
     (re.compile(r"^/api/ai/explain-file$"), "POST", "ai.explain"),

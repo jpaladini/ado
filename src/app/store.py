@@ -91,6 +91,11 @@ class Store:
                     "user_email STRING, id STRING, name STRING, definition STRING, "
                     "updated_at TIMESTAMP)"
                 )
+                self._exec(
+                    f"CREATE TABLE IF NOT EXISTS {fq}.ai_sessions ("
+                    "user_email STRING, id STRING, project STRING, title STRING, "
+                    "state STRING, updated_at TIMESTAMP)"
+                )
                 self._ready = True
             except Exception as e:
                 self._ready, self._reason = False, str(e)[:300]
@@ -183,6 +188,67 @@ class Store:
 
     async def delete_report(self, user: str, report_id: str) -> None:
         await anyio.to_thread.run_sync(self._delete_report, user, report_id)
+
+    # -- copilot sessions (chat state blobs, per user) ----------------------------
+
+    def _list_sessions(self, user: str, project: str) -> list[dict[str, str]]:
+        if not self._ensure():
+            return []
+        r = self._exec(
+            f"SELECT id, title, CAST(updated_at AS STRING) FROM {_fq()}.ai_sessions "
+            f"WHERE user_email = :user AND project = :project "
+            f"ORDER BY updated_at DESC LIMIT 50",
+            {"user": user, "project": project},
+        )
+        rows = (r.result.data_array or []) if r.result else []
+        return [dict(zip(["id", "title", "updatedAt"], row)) for row in rows]
+
+    def _get_session(self, user: str, session_id: str) -> dict[str, str] | None:
+        if not self._ensure():
+            return None
+        r = self._exec(
+            f"SELECT id, project, title, state FROM {_fq()}.ai_sessions "
+            f"WHERE user_email = :user AND id = :id LIMIT 1",
+            {"user": user, "id": session_id},
+        )
+        rows = (r.result.data_array or []) if r.result else []
+        if not rows:
+            return None
+        return dict(zip(["id", "project", "title", "state"], rows[0]))
+
+    def _save_session(self, user: str, session_id: str, project: str, title: str, state: str) -> None:
+        if not self._ensure():
+            raise RuntimeError(self._reason or "app-state store unavailable")
+        self._exec(
+            f"""MERGE INTO {_fq()}.ai_sessions s
+                USING (SELECT :user AS u, :id AS i, :project AS p, :title AS t, :state AS st) x
+                ON s.user_email = x.u AND s.id = x.i
+                WHEN MATCHED THEN UPDATE SET title = x.t, state = x.st,
+                     updated_at = current_timestamp()
+                WHEN NOT MATCHED THEN INSERT (user_email, id, project, title, state, updated_at)
+                     VALUES (x.u, x.i, x.p, x.t, x.st, current_timestamp())""",
+            {"user": user, "id": session_id, "project": project, "title": title, "state": state},
+        )
+
+    def _delete_session(self, user: str, session_id: str) -> None:
+        if not self._ensure():
+            raise RuntimeError(self._reason or "app-state store unavailable")
+        self._exec(
+            f"DELETE FROM {_fq()}.ai_sessions WHERE user_email = :user AND id = :id",
+            {"user": user, "id": session_id},
+        )
+
+    async def list_sessions(self, user: str, project: str) -> list[dict[str, str]]:
+        return await anyio.to_thread.run_sync(self._list_sessions, user, project)
+
+    async def get_session(self, user: str, session_id: str) -> dict[str, str] | None:
+        return await anyio.to_thread.run_sync(self._get_session, user, session_id)
+
+    async def save_session(self, user: str, session_id: str, project: str, title: str, state: str) -> None:
+        await anyio.to_thread.run_sync(self._save_session, user, session_id, project, title, state)
+
+    async def delete_session(self, user: str, session_id: str) -> None:
+        await anyio.to_thread.run_sync(self._delete_session, user, session_id)
 
     # -- audit ------------------------------------------------------------------
 

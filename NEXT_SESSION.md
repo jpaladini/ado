@@ -148,7 +148,12 @@ API reads, Genie space creation) is allowed.
    actions `report.run/save/delete`. Lead-time measures use a SQL business-days
    closed form (epoch-Monday method) tested equal to `business_days_between`.
    Deferred: builder filter UI (backend already accepts parameterized filters).
-2. Copilot session history (store table `ai_sessions` was designed for it in 4A).
+2. ~~Copilot session history~~ **SHIPPED 2026-07-03**: `ai_sessions` store table
+   (opaque `state` JSON: turns + proposal outcomes), routes
+   `GET/PUT /api/copilot/sessions` + `GET/DELETE /api/copilot/sessions/{id}`
+   (413 cap 400k chars), session-chip bar on the Copilot screen with autosave
+   (debounced, after answered turns), restore, and delete. Audit:
+   `copilot.session.save/delete`.
 3. Artifacts: PDF/Excel exports from copilot + Reports (openpyxl/weasyprint).
 4. Small: PR/work-item row-click affordance chevrons (promised, unshipped);
    route-tests + coverage gate; model eval harness before swapping
