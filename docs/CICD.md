@@ -13,6 +13,16 @@ branches** — PR promotion carries no environment diffs.
 Promotion path: open a PR `dev → stg`, then `stg → prod`. Each merge triggers a deploy to
 that environment. Direct pushes are blocked by branch policy; merges go through PRs.
 
+> **Two development models.** The GitHub → mirror-Action → ADO loop described in
+> "Mirror GitHub → Azure DevOps" below is the **outside-development model**: personal
+> dev and any future work done outside a corporate network, where GitHub is the agent's
+> origin and the mirror lands branches in ADO. **Corporate environments do not use the
+> mirror**: the repo arrives via a **one-time import** into corporate ADO Repos, and
+> from then on every change originates inside the corporate network (feature branch →
+> PR → pipeline; the mirror workflow file is inert there). The two repos are expected
+> to drift; any refresh from outside is a deliberate, human-reviewed re-import — never
+> a sync. See `docs/CORPORATE_BOOTSTRAP.md` Phase 1.
+
 ## Pipelines in this repo
 
 | File | Purpose | Trigger |

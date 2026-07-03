@@ -22,28 +22,45 @@ Ask the human for, and record in the session:
 | 3 | Catalog to use (NOT `workspace` in corporate) | `main` or a domain catalog |
 | 4 | ADO org URL + project + repo | `https://dev.azure.com/<org>` / `<project>` / `ado` |
 | 5 | ADO PAT (scopes: Work Items R/W, Code R/W, Build R+E) | `…` |
-| 6 | A second, Code-R/W-only ADO PAT for the GitHub mirror | `…` |
-| 7 | Serving endpoint names available (Llama and/or Claude) | `databricks-claude-sonnet-5` |
-| 8 | SQL warehouse id the app may use | `abc123…` |
-| 9 | Which branch = this environment (`dev`/`stg`/`prod`) | `stg` |
+| 6 | Serving endpoint names available (Llama and/or Claude) | `databricks-claude-sonnet-5` |
+| 7 | SQL warehouse id the app may use | `abc123…` |
+| 8 | Which branch = this environment (`dev`/`stg`/`prod`) | `stg` |
+| 9 | The public GitHub repo URL/snapshot for the ONE-TIME import | `https://github.com/jpaladini/ado` |
 
 Gate: every row filled. Also confirm **network egress**: from a notebook in the
 corporate workspace, `import requests; requests.get("https://dev.azure.com")`
 must succeed — the whole operational plane depends on it (PLAN §8 risk).
 
-## Phase 1 — Repo + mirror + pipelines (docs/CICD.md)
+## Phase 1 — Repo import (ONE-TIME) + pipelines
 
-1. AGENT: confirm the GitHub repo is mirrored into the corporate ADO project
-   (workflow `.github/workflows/mirror-to-ado.yml`); HUMAN sets the GitHub
-   secrets `ADO_REPO_URL` + `ADO_PAT` (the Code-R/W-only PAT, input #6).
+> **Corporate has no GitHub and no mirror.** The GitHub → mirror-Action → ADO
+> loop in `docs/CICD.md` is the **outside-development model only** (personal
+> dev, and any future work done outside the corporate network — keep it, it's
+> the path new features arrive on). In corporate the code arrives **once**,
+> and from that moment every change originates inside the corporate network:
+> feature branch in the corporate ADO repo → PR into the env branch →
+> pipeline. Nothing flows in automatically afterwards; the two repos are
+> expected to drift, and any future refresh from outside is a deliberate,
+> human-reviewed re-import — never a sync job.
+
+1. HUMAN: **one-time import** — ADO Repos → *Import repository* with the
+   GitHub URL (input #9); if egress policy blocks the importer, clone locally
+   and `git push --mirror` from inside the network. After the import,
+   `.github/workflows/mirror-to-ado.yml` is inert (Actions don't run in ADO)
+   — leave it in the tree as documentation of the outside loop, or delete it
+   in the first corporate PR; either is fine.
 2. HUMAN: create the deploy **service principal** in the corporate workspace,
    then the ADO **variable group** `databricks-<env>` with `DATABRICKS_HOST`,
-   `DATABRICKS_CLIENT_ID`, `DATABRICKS_CLIENT_SECRET` (docs/CICD.md §1–2).
+   `DATABRICKS_CLIENT_ID`, `DATABRICKS_CLIENT_SECRET` (docs/CICD.md §1–2 —
+   these sections are ADO-native and apply unchanged).
 3. HUMAN: register `azure-pipelines.yml` + `azure-pipelines-validate.yml` and
-   protect the env branch (only humans complete PRs into it).
+   protect the env branch (only humans complete PRs into it). Set the repo's
+   **default branch** to the env branch — the dev org's default branch was a
+   stale feature branch and code search/Code tab suffered for it.
 
-Gate: push a trivial commit to a feature branch → it appears in ADO within a
-minute; the validate pipeline runs on a PR into the env branch.
+Gate: the import shows the full history; a trivial feature-branch commit made
+*inside* the corporate ADO repo raises a PR into the env branch and the
+validate pipeline runs on it.
 
 ## Phase 2 — Secrets (AGENTS.md "Secrets reference"; HUMAN via notebook)
 
