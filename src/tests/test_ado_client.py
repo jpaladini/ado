@@ -474,3 +474,21 @@ async def test_pr_vote_and_status(capturing):
     assert method == "PATCH"
     assert path == "/Proj/_apis/git/repositories/repo-1/pullRequests/7"
     assert json.loads(body) == {"status": "abandoned"}
+
+
+@pytest.mark.asyncio
+async def test_connection_data_sends_no_api_version():
+    """connectionData is unversioned — api-version=7.1 gets a 400 from ADO,
+    which broke PR approve (reviewer id resolves through here)."""
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["params"] = dict(request.url.params)
+        return httpx.Response(200, json={"authenticatedUser": {"id": "u1", "providerDisplayName": "Jason"}})
+
+    c = ADOClient(org_url="https://dev.azure.com/myorg", pat="x")
+    transport = httpx.MockTransport(handler)
+    c._client = lambda: httpx.AsyncClient(base_url=c.org_url, transport=transport)  # type: ignore[method-assign]
+    me = await c.connection_data()
+    assert me == {"id": "u1", "displayName": "Jason"}
+    assert "api-version" not in seen["params"]

@@ -108,7 +108,13 @@ class ADOClient:
     # -- identity & projects --------------------------------------------------
 
     async def connection_data(self) -> dict[str, Any]:
-        data = await self._get("/_apis/connectionData")
+        # connectionData is unversioned — sending api-version=7.1 gets a 400,
+        # which silently broke everything that resolves the current user
+        # (PR approve resolves the reviewer id through here).
+        async with self._client() as client:
+            resp = await client.get("/_apis/connectionData")
+            resp.raise_for_status()
+            data = resp.json()
         user = data.get("authenticatedUser", {})
         return {
             "id": user.get("id"),

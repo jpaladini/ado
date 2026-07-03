@@ -120,6 +120,8 @@ function usePrActions(project: string, pr: PullRequest, onApproved: () => void) 
       onApproved();
       toast(`PR !${pr.id} approved`);
     },
+    // a silent failure looks like a dead button — always say what happened
+    onError: (e) => toast(`Approve failed: ${(e as Error).message}`),
   });
   const setStatusMut = useMutation({
     mutationFn: (s: string) => setPullRequestStatus(project, repoId!, pr.id, s),
@@ -127,6 +129,7 @@ function usePrActions(project: string, pr: PullRequest, onApproved: () => void) 
       qc.invalidateQueries({ queryKey: ["prs", project] });
       toast(`PR !${pr.id} ${s === "abandoned" ? "abandoned" : "reactivated"}`);
     },
+    onError: (e) => toast(`Failed: ${(e as Error).message}`),
   });
   return { vote, setStatusMut, busy: vote.isPending || setStatusMut.isPending, canAct: !!repoId };
 }
