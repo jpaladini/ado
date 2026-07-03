@@ -183,7 +183,7 @@ function Row({
   return (
     <div
       onClick={onOpen}
-      className="flex cursor-pointer items-center gap-3 border-t border-line px-[18px] py-[13px] hover:bg-hover"
+      className="group flex cursor-pointer items-center gap-3 border-t border-line px-[18px] py-[13px] hover:bg-hover"
     >
       <span className="w-[42px] flex-none font-mono text-[12px] text-faint">!{pr.id}</span>
       <div className="min-w-0 flex-1">
@@ -202,6 +202,9 @@ function Row({
       <span className="w-[72px] flex-none text-right text-[12px] text-text-3">{pr.createdBy ?? "—"}</span>
       <span className="w-[44px] flex-none text-right font-mono text-[11px] text-faint">
         {relTime(pr.creationDate)}
+      </span>
+      <span className="inline-block flex-none -rotate-90 text-faint opacity-40 group-hover:opacity-100">
+        <IconChevron size={11} />
       </span>
     </div>
   );

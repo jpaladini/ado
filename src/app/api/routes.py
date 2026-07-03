@@ -144,14 +144,8 @@ def _percentile(sorted_vals: list[float], p: float) -> float:
     return sorted_vals[k]
 
 
-@router.get("/projects/{project}/reports")
-async def reports(
-    project: str,
-    range: str = Query("30d"),
-    types: str = Query(""),
-    assignees: str = Query(""),
-) -> dict[str, object]:
-    """Everything the Reports tab draws, in one round trip. All aggregation is
+async def _gather_reports(project: str, range: str, types: str, assignees: str) -> dict[str, object]:
+    """Shared by the Reports tab payload and the xlsx export. All aggregation is
     server-side OData $apply; KPIs are derived here from the same payloads."""
     import asyncio
 
@@ -184,6 +178,7 @@ async def reports(
         "range": range,
         "days": days,
         "durationUnit": "businessDays",
+        "filters": {"types": type_list or [], "assignees": assignee_list or []},
         "kpis": {
             "throughput": completed_total,
             "created": created_total,
@@ -199,6 +194,39 @@ async def reports(
         "cfd": cfd_rows,
         "openItems": open_items,
     }
+
+
+@router.get("/projects/{project}/reports")
+async def reports(
+    project: str,
+    range: str = Query("30d"),
+    types: str = Query(""),
+    assignees: str = Query(""),
+) -> dict[str, object]:
+    """Everything the Reports tab draws, in one round trip."""
+    return await _gather_reports(project, range, types, assignees)
+
+
+@router.get("/projects/{project}/reports/export")
+async def reports_export(
+    project: str,
+    range: str = Query("30d"),
+    types: str = Query(""),
+    assignees: str = Query(""),
+):
+    """The same flow metrics as an .xlsx download (all durations business days)."""
+    from fastapi.responses import Response
+
+    from app import exports
+
+    payload = await _gather_reports(project, range, types, assignees)
+    data = exports.reports_workbook(project, payload)
+    fname = f"flow-metrics-{project}-{range}.xlsx"
+    return Response(
+        content=data,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+    )
 
 
 # -- global search (work items + code) ---------------------------------------------

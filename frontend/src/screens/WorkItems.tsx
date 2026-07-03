@@ -130,7 +130,8 @@ export default function WorkItems({
                 <Th className="w-[148px]">State</Th>
                 <Th>Assignee</Th>
                 <Th>Tags</Th>
-                <Th className="pr-[18px] text-right">Updated</Th>
+                <Th className="text-right">Updated</Th>
+                <Th className="w-[30px] pr-[18px]"> </Th>
               </tr>
             </thead>
             <tbody>
@@ -168,7 +169,7 @@ function Row({ project, wi, onOpen }: { project: string; wi: WorkItem; onOpen: (
   const states = Array.from(new Set([wi.state, ...STATES])).filter(Boolean) as string[];
 
   return (
-    <tr onClick={onOpen} className="cursor-pointer border-t border-line hover:bg-hover">
+    <tr onClick={onOpen} className="group cursor-pointer border-t border-line hover:bg-hover">
       <td className="px-[18px] py-[9px] font-mono text-faint">#{wi.id}</td>
       <td className="px-[8px] py-[9px]">
         <span className="inline-flex items-center gap-[6px] text-text-2">
@@ -208,7 +209,12 @@ function Row({ project, wi, onOpen }: { project: string; wi: WorkItem; onOpen: (
           ))}
         </span>
       </td>
-      <td className="px-[18px] py-[9px] text-right font-mono text-faint">{relTime(wi.changedDate)}</td>
+      <td className="px-[8px] py-[9px] text-right font-mono text-faint">{relTime(wi.changedDate)}</td>
+      <td className="pr-[18px] text-right">
+        <span className="inline-block -rotate-90 text-faint opacity-40 group-hover:opacity-100">
+          <IconChevron size={11} />
+        </span>
+      </td>
     </tr>
   );
 }

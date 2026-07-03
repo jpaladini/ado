@@ -4,3 +4,4 @@ httpx==0.28.1
 pydantic-settings==2.7.1
 databricks-sdk==0.40.0
 mlflow-skinny==3.14.0
+openpyxl==3.1.5
