@@ -36,7 +36,7 @@ const SUGGESTIONS = [
   "Any PRs waiting on review?",
 ];
 
-export default function Copilot({ project }: { project: string }) {
+export default function Copilot({ project, panel = false }: { project: string; panel?: boolean }) {
   const health = useQuery({ queryKey: ["health"], queryFn: fetchHealth });
   const qc = useQueryClient();
   const [turns, setTurns] = useState<Turn[]>([]);
@@ -136,15 +136,19 @@ export default function Copilot({ project }: { project: string }) {
     mut.mutate(text);
   };
 
-  if (health.data && !health.data.copilot_configured) return <NotConfigured />;
+  if (health.data && !health.data.copilot_configured) return <NotConfigured panel={panel} />;
 
   return (
-    <div className="mx-auto max-w-[860px]">
-      <H1>AI Copilot</H1>
-      <p className="m-0 mt-[5px] text-[12.5px] text-muted">
-        An agent over your live Azure DevOps data. It reads freely; every change it wants to make
-        comes back as a proposal you apply.
-      </p>
+    <div className={panel ? "flex min-h-full flex-col" : "mx-auto max-w-[860px]"}>
+      {!panel && (
+        <>
+          <H1>AI Copilot</H1>
+          <p className="m-0 mt-[5px] text-[12.5px] text-muted">
+            An agent over your live Azure DevOps data. It reads freely; every change it wants to make
+            comes back as a proposal you apply.
+          </p>
+        </>
+      )}
       <FreshnessBar />
 
       {/* -------- session history bar -------- */}
@@ -185,7 +189,7 @@ export default function Copilot({ project }: { project: string }) {
       )}
 
       {turns.length === 0 && (
-        <div className="mt-6 grid grid-cols-2 gap-2">
+        <div className={`mt-6 grid gap-2 ${panel ? "grid-cols-1" : "grid-cols-2"}`}>
           {SUGGESTIONS.map((s) => (
             <button
               key={s}
@@ -198,7 +202,7 @@ export default function Copilot({ project }: { project: string }) {
         </div>
       )}
 
-      <div className="mt-5 space-y-5">
+      <div className={`mt-5 space-y-5 ${panel ? "flex-1" : ""}`}>
         {turns.map((t, i) => (
           <TurnView
             key={i}
@@ -237,10 +241,10 @@ export default function Copilot({ project }: { project: string }) {
   );
 }
 
-function NotConfigured() {
+function NotConfigured({ panel = false }: { panel?: boolean }) {
   return (
-    <div className="mx-auto max-w-[860px]">
-      <H1>AI Copilot</H1>
+    <div className={panel ? "" : "mx-auto max-w-[860px]"}>
+      {!panel && <H1>AI Copilot</H1>}
       <Card className="mt-5 p-6">
         <div className="text-[13px] font-semibold text-text">The copilot isn’t set up yet</div>
         <p className="mt-1 text-[12.5px] text-muted">
