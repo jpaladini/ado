@@ -20,6 +20,8 @@ edits only.
 | `part-2-analytics-odata.md` | 2 — choosing OData for analytics | draft, complete |
 | `part-3-ai-copilot-agent.md` | 3 — the AI copilot agent | draft, complete |
 | `part-4-mlflow-tracing-agent.md` | 4 — MLflow tracing | draft, complete |
+| `part-5-ai-in-the-flow-of-work.md` | 5 — in-place AI (enrichment, PR review, Explain) | draft, complete |
+| `part-6-flow-metrics-business-days.md` | 6 — Reports tab, business days, Observable Plot | draft, complete |
 | `analytics-overview-light.png`, `analytics-overview-30d.png` | used by Part 2 | final |
 
 Canonical source of truth: the `docs/blog/` folder of Jason's `ado` repo (branch `dev`).

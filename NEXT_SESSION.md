@@ -1,7 +1,7 @@
 # NEXT_SESSION.md — session handoff & resume guide
 
 > **For the next Claude Code session (and for Jason).** This file captures the complete
-> working state as of **2026-07-02** so a fresh session can resume in minutes. Read this,
+> working state as of **2026-07-03** so a fresh session can resume in minutes. Read this,
 > then `AGENTS.md` (runbooks + operational rules), then `PLAN.md` (roadmap). Do not
 > re-derive or re-create any infrastructure listed here — it exists and works.
 
@@ -54,7 +54,7 @@ Pipeline → `databricks bundle deploy` → live app.**
 | ADO org / project / repo | `jpaladini85` / `home` / `ado` |
 | ADO deploy branch | `dev` (protected; **only Jason merges PRs into it** — agent merge is classifier-blocked by design) |
 | GitHub repo | `jpaladini/ado`; mirror workflow `.github/workflows/mirror-to-ado.yml` |
-| Secrets (scope `ado`) | `ado_org_url`, `ado_pat`, `ado_project`(=home), `genie_space_id` — all set |
+| Secrets (scope `ado`) | `ado_org_url`, `ado_pat`, `ado_project`(=home), `genie_space_id`, `copilot_endpoint`, `mlflow_experiment_id` — all set |
 
 ## 4. The delivery loop (use it for every change)
 
@@ -62,7 +62,7 @@ Pipeline → `databricks bundle deploy` → live app.**
 other way):**
 
 ```
-1. git push → GitHub repo jpaladini/ado, branch claude/web-first-app-planning-xsz5l0
+1. git push → GitHub repo jpaladini/ado, on the current session branch
 2.   triggers GitHub Action: .github/workflows/mirror-to-ado.yml
 3.     which force-pushes the same branch → Azure DevOps repo jpaladini85/home/_git/ado
 4.       agent creates a PR (branch → dev) via the ADO REST API
@@ -98,67 +98,59 @@ or SQL — he's fast with them):** secret writes, any RBAC/GRANT/permissions API
 completing/merging PRs, broad destructive ops. Everything else (job run-now, PR create,
 API reads, Genie space creation) is allowed.
 
-## 5. Current state (as of handoff)
+## 5. Current state (as of 2026-07-03 handoff)
 
-**Deployed & verified working in the live app:**
-- Phases 0–3 complete: CRUD tabs, Overview with live OData aggregates + range control,
-  Genie Analytics tab (real answers over real data), freshness stamp with exact
-  last-update time + **Refresh now** button (job-permission granted, tested by Jason).
-- Phase 4A (identity/settings/audit): **merged & deployed** (PRs #6, #7). Store schema +
-  grants exist; tables auto-created; settings popover works.
+**Everything below is merged & deployed** (PR ledger: #6–#19, all completed; the
+2026-07-02/03 session shipped #9–#19). The app is feature-complete through Phase 4C+4F:
 
-**Merged 2026-07-02:** PR #8 (whoami store probe). Jason should still confirm the popover
-says activity log **on** and a state change lands a row in
-`workspace.ado_companion_app.audit_log`.
+- **Tabs**: Overview (live OData aggregates) · Work Items (full CRUD, drawers, AI
+  draft/improve buttons) · Pull Requests (detail drawer: files, difflib diffs, threads,
+  comments, in-place AI review w/ validated line anchors) · Pipelines · Code (3-pane
+  browser: branch picker, lazy tree, highlight.js viewer, collapsible rails, markdown
+  Preview, plain-language Explain) · **AI Copilot** (tool-calling agent) · **Reports**
+  (Observable Plot flow analytics) · settings/audit footer.
+- **AI copilot (4D + hardening)**: FMAPI agent loop, propose-then-apply (write tools
+  NEVER execute — proposal cards Apply through normal REST routes), write-target
+  verification (guessed work-item/PR ids rejected mid-loop), llama text-form tool-call
+  fallback parser, outcome notes round-tripped in history, Genie as the
+  `query_analytics_history` tool, `get_flow_metrics` tool (business days).
+- **In-place AI (the "buttons over chat" layer)**: suggest-workitem, review-pr (server
+  validates every suggested line against real right-side hunk lines — clamp/drop),
+  explain-file. All: audit actions (`ai.suggest/review/explain`) + MLflow spans with
+  token usage. Buttons gated on `copilot_configured`.
+- **Reports (4C)**: one `/api/projects/{p}/reports` round trip; filters
+  range/types/assignees; KPI strip, created-vs-completed, CFD, cycle-time scatter w/
+  p50/p85 bands, aging WIP (red above p85), workload, needs-attention. **All durations
+  are 5-day-workweek business days** (`business_days_between` — retired Jason's custom
+  Power BI semantic model; holidays = future setting). Charts: **Observable Plot**
+  (ISC, lazy chunk, no external calls, themed on CSS tokens → dark mode free) via
+  `PlotFigure` (re-renders on resize + theme flip).
+- **Observability**: every model call traced to experiment 3567576457281688 with token
+  usage; every AI/mutating action in `workspace.ado_companion_app.audit_log`.
+- **Tests**: 69 pytest, ~72% line coverage (client 92%, ai 83%; routes 56% — offered
+  TestClient+CI-gate PR, not yet requested). Frontend has no automated tests
+  (Playwright screenshots + live smokes per PR instead).
 
-- **PR #9 (Phase 4B — work items full CRUD)** and **PR #10 (Genie empty-table fix:
-  rows now fetched from statement result chunks)** — both merged & deployed 2026-07-02.
+**Next up (agreed order):**
+1. **4E report builder on UC metric views** — VERIFIED on Free Edition:
+   `CREATE VIEW … WITH METRICS LANGUAGE YAML` + `MEASURE()` round-trip works (probe
+   view created in workspace.default, then dropped). Design in PLAN §5a 4E: measures/
+   dimensions in UC (governed, Genie-visible), builder picks dims × measures × chart,
+   app renders with the same Plot components. Batch plane — historical only.
+2. Copilot session history (store table `ai_sessions` was designed for it in 4A).
+3. Artifacts: PDF/Excel exports from copilot + Reports (openpyxl/weasyprint).
+4. Small: PR/work-item row-click affordance chevrons (promised, unshipped);
+   route-tests + coverage gate; model eval harness before swapping
+   `copilot_endpoint` to `databricks-claude-sonnet-5` in corporate.
 
-- **PR #11 (4D copilot)**, **PR #12 (copilot hardening + Genie-as-tool)**,
-  **PR #13 (blog parts 3+4)** — merged & deployed 2026-07-02. Copilot secrets set,
-  traces flowing to experiment 3567576457281688.
+**Blog**: Parts 1–6 drafted in `docs/blog/`, all `draft: true`, screenshot slots
+marked (1 build+CI/CD · 2 OData · 3 copilot · 4 MLflow tracing · 5 in-place AI ·
+6 flow metrics/business days/Plot). `WEBSITE_HANDOFF.md` = self-contained publishing
+instructions for Jason's website agent (Astro + Tailwind site, minimalist B&W,
+jpaladini.vercel.app, no blog section yet). Jason has the handoff files in chat too.
 
-**In flight — PR #14** (branch `claude/resume-next-session-pbbmrk`) carries THREE
-things (Jason's merges lagged the session, so commits stacked on the open PR):
-1. **AI work-item enrichment**: "Draft with AI" (create drawer) / "Improve with AI"
-   (edit drawer) via POST /api/ai/suggest-workitem (`src/app/ai.py`, ai.suggest audit).
-2. **4F code browser + AI PR review**: Code tab 3-pane (branch picker, lazy tree,
-   highlight.js viewer); PR detail drawer (files/diffs/threads/comments, diffs via
-   stdlib difflib server-side); copilot PR tools (read: list_pr_files,
-   get_pr_file_diff, list_pr_threads, get_file windowed; write proposals:
-   comment_on_pr, comment_on_pr_file w/ PR-target verification). Live-smoked:
-   "review the open PR" → real diff reads → file-anchored comment proposal.
-3. **In-place AI review** (Jason's ask: AI review inside the PR tab, not just chat):
-   "AI review" button in the PR drawer header + "Review this file" per diff →
-   POST /api/ai/review-pr (`ai.review_pr`): server fetches the diffs itself, one
-   forced function call, then **validates every suggested line against the actual
-   right-side hunk lines** (clamp/drop — hallucinated line numbers are structurally
-   impossible). Suggestions render as severity-chipped cards UNDER each file's diff
-   with Post comment / Dismiss; Post goes through the normal threads route
-   (pr.comment audit). ai.review audit + MLflow span.
-4. **Blog website handoff brief** (docs/blog/WEBSITE_HANDOFF.md).
-
-**Also shipped 2026-07-02/03** (PRs #17 in-place AI review, #18 code-tab UX, and the
-4C Reports PR): Reports tab (Observable Plot flow analytics, business-day durations —
-see PLAN §5a 4C), in-place AI PR review, code-tab collapse/preview/Explain.
-
-**Next up: 4E report builder on UC metric views** (verified working on Free Edition —
-see PLAN §5a 4E), then copilot session history, then artifacts (PDF/Excel).
-- **4D — AI tab**: move Genie chat to dedicated tab + per-user session history (store).
-- **4E — Report builder**: visual OData query builder + saved reports (store).
-- **4F — Code browser**: branch picker, file tree, file viewer w/ highlighting.
-
-**Also pending / notable:**
-- Model for the future FMAPI copilot (Phase 5): Jason leaning `databricks-claude-sonnet-5`
-  (Databricks-served) vs `llama-4-maverick`; endpoint name will be config.
-- Blog drafts live in `docs/blog/` — Parts 1 & 2 (build + OData), **Part 3 (the AI
-  copilot: decisions, propose-then-apply, Genie-as-tool) and Part 4 (MLflow tracing:
-  span design, the two day-one diagnoses) drafted 2026-07-02**. All `draft: true`;
-  screenshot slots marked inline. Jason's site is Astro + Tailwind, minimalist B&W
-  (github.com/jpaladini/jpaladini → jpaladini.vercel.app), no blog section yet.
-- Open-sourcing is a stated goal: keep `AGENTS.md` self-sufficient and vendor-neutral;
-  never commit tokens; rotate the PATs before going public (they appeared in a session
-  transcript).
+**Open-sourcing** remains a goal: keep AGENTS.md self-sufficient; never commit tokens;
+**rotate both PATs before going public** (they appeared in session transcripts).
 
 ## 6. Architecture cheat sheet (where things live)
 
@@ -169,15 +161,19 @@ src/app/ado/client.py      operational plane: live ADO REST (httpx, PAT basic au
 src/app/ado/analytics.py   analytical plane: ADO Analytics OData ($apply, snapshots)
 src/app/genie.py           Genie Conversation API client (space id from secret at runtime)
 src/app/copilot.py         AI copilot: FMAPI tool-calling agent loop, propose-then-apply,
-                           MLflow turn tracing (endpoint/experiment from secrets at runtime)
+                           write-target verification, text-form call fallback, MLflow tracing
+src/app/ai.py              single-shot AI: suggest_work_item, review_pr (line validation),
+                           explain_file — shares copilot's endpoint/tracing plumbing
 src/app/insights.py        table freshness (DESCRIBE DETAIL) + ingest run-now
 src/app/store.py           Delta app-state store (settings, audit) — parameterized SQL,
                            batched audit writes, graceful degradation, 120s re-probe
 src/app/identity.py        X-Forwarded-* header identity
 jobs/ingest_ado_analytics.py  OData → Delta job (explicit schemas! all-NULL gotcha)
-frontend/src/screens/      Overview, WorkItems, PullRequests, Pipelines, Code, Analytics
-frontend/src/components/   Shell (nav/topbar), UserFooter (settings popover), Toast, ui, icons
-frontend/src/lib/          theme (CSS-var dark mode), tokens (chip class maps)
+frontend/src/screens/      Overview, WorkItems, PullRequests, Pipelines, Code, Copilot, Reports
+frontend/src/components/   Shell, Drawer(+Field/Select), AIButton, PlotFigure, CodeBlock,
+                           FreshnessBar, UserFooter, Toast, ui, icons
+frontend/src/lib/          theme, tokens, text (html<->text), highlight (lazy hljs),
+                           markdown (safe mini-renderer), plot (lazy Observable Plot + palette)
 databricks.yml             Asset Bundle: app + secret resources + ingest job (dev/stg/prod targets)
 azure-pipelines.yml        deploy on merge to dev/stg/prod (SP auth via pipeline variables)
 ```
