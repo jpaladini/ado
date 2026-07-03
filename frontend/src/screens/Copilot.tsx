@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   addWorkItemComment,
   askCopilot,
+  createCodePr,
   createPrThread,
   createWorkItem,
   deleteCopilotSession,
@@ -349,6 +350,26 @@ function AnswerView({
   );
 }
 
+/** One proposed file in a code-change proposal — path + size, content behind a toggle. */
+function FileEditRow({ edit }: { edit: { path: string; content: string } }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="border-t border-line py-[4px] first:border-t-0">
+      <button onClick={() => setOpen((o) => !o)} className="flex w-full items-center gap-[8px] text-left">
+        <span className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-text-2">{edit.path}</span>
+        <span className="flex-none font-mono text-[10.5px] text-faint">
+          {edit.content.split("\n").length} lines · {open ? "hide" : "view"}
+        </span>
+      </button>
+      {open && (
+        <pre className="mt-[4px] max-h-[260px] overflow-auto rounded-[6px] bg-surface-2 p-[8px] font-mono text-[11px] leading-[1.5] text-text-2">
+          {edit.content}
+        </pre>
+      )}
+    </div>
+  );
+}
+
 const FIELD_LABELS: Record<string, string> = {
   type: "Type",
   title: "Title",
@@ -374,6 +395,10 @@ function proposalTitle(p: CopilotProposal): string {
   if (p.tool === "add_work_item_comment") return `Comment on #${a.id}`;
   if (p.tool === "comment_on_pr") return `Comment on PR !${a.prId}`;
   if (p.tool === "comment_on_pr_file") return `Comment on ${a.path}:${a.line} in PR !${a.prId}`;
+  if (p.tool === "create_code_pr") {
+    const n = Array.isArray(a.edits) ? a.edits.length : 0;
+    return `Code change PR: ${a.title ?? ""} (${n} file${n === 1 ? "" : "s"} → ${a.baseBranch})`;
+  }
   return p.tool;
 }
 
@@ -428,6 +453,14 @@ function ProposalCard({
             : {}),
         });
       }
+      if (p.tool === "create_code_pr") {
+        return createCodePr(project, String(a.repositoryId), {
+          baseBranch: String(a.baseBranch),
+          title: String(a.title),
+          description: a.description ? String(a.description) : undefined,
+          edits: (p.args.edits as { path: string; content: string }[]) ?? [],
+        });
+      }
       throw new Error(`Unknown proposal type: ${p.tool}`);
     },
     onSuccess: (d: unknown) => {
@@ -438,6 +471,12 @@ function ProposalCard({
           queryKey: ["prthreads", project, String(p.args.repositoryId), Number(p.args.prId)],
         });
       }
+      if (p.tool === "create_code_pr") {
+        const pr = d as { prId?: number; branch?: string };
+        toast(pr?.prId ? `PR !${pr.prId} opened from ${pr.branch}` : "PR opened");
+        qc.invalidateQueries({ queryKey: ["prs", project] });
+        return;
+      }
       const created = d as { id?: number };
       toast(p.tool === "create_work_item" && created?.id ? `#${created.id} created` : "Applied");
     },
@@ -445,8 +484,14 @@ function ProposalCard({
   });
 
   const rows = Object.entries(p.args).filter(
-    ([k]) => !HIDDEN_ARGS.has(k) && (k !== "id" || p.tool === "update_work_item"),
+    ([k]) =>
+      !HIDDEN_ARGS.has(k) &&
+      k !== "edits" && // file contents render as a compact list below, never inline
+      (k !== "id" || p.tool === "update_work_item"),
   );
+  const edits = Array.isArray(p.args.edits)
+    ? (p.args.edits as { path: string; content: string }[])
+    : [];
 
   return (
     <div className="rounded-[8px] border border-accent-border bg-accent-tint p-[12px_14px]">
@@ -469,6 +514,14 @@ function ProposalCard({
           ))}
         </tbody>
       </table>
+      {edits.length > 0 && (
+        <div className="mt-[6px]">
+          <div className="text-[10.5px] font-semibold uppercase tracking-[0.5px] text-faint">Files</div>
+          {edits.map((e) => (
+            <FileEditRow key={e.path} edit={e} />
+          ))}
+        </div>
+      )}
       {apply.isError && <div className="mt-2 text-[11.5px] text-danger">{(apply.error as Error).message}</div>}
       {status === "pending" && (
         <div className="mt-[10px] flex gap-[8px]">

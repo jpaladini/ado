@@ -412,6 +412,62 @@ async def create_pr_thread(
     )
 
 
+# -- code-change PRs (the coding agent's apply path) --------------------------------
+
+
+class CodeEdit(BaseModel):
+    path: str
+    content: str
+
+
+class CodePrBody(BaseModel):
+    baseBranch: str
+    title: str
+    description: str = ""
+    edits: list[CodeEdit]
+    branchName: str | None = None  # server-generated when absent
+
+
+@router.post("/projects/{project}/repos/{repo_id}/code-pr")
+async def create_code_pr(project: str, repo_id: str, body: CodePrBody) -> dict[str, object]:
+    """Create a branch with the edits and open a PR into baseBranch. The change
+    never lands on baseBranch directly — CI validates the PR, a human merges it."""
+    import re
+    import uuid
+
+    if not body.title.strip():
+        raise HTTPException(status_code=422, detail="title is required")
+    if not body.edits or len(body.edits) > 8:
+        raise HTTPException(status_code=422, detail="between 1 and 8 file edits")
+    for e in body.edits:
+        if not e.path.startswith("/"):
+            raise HTTPException(status_code=422, detail=f"path must start with /: {e.path}")
+        if len(e.content) > 150_000:
+            raise HTTPException(status_code=422, detail=f"content too large: {e.path}")
+
+    branch = (body.branchName or "").strip()
+    if not branch:
+        slug = re.sub(r"[^a-z0-9]+", "-", body.title.lower()).strip("-")[:40] or "change"
+        branch = f"copilot/{slug}-{uuid.uuid4().hex[:6]}"
+
+    async def run(c: ADOClient):
+        await c.push_branch_with_edits(
+            project, repo_id, body.baseBranch, branch, body.title,
+            [e.model_dump() for e in body.edits],
+        )
+        return await c.create_pull_request(
+            project, repo_id, branch, body.baseBranch, body.title, body.description
+        )
+
+    try:
+        pr = await _call(run)
+    except HTTPException:
+        raise
+    except ValueError as e:  # e.g. base branch not found
+        raise HTTPException(status_code=422, detail=str(e))
+    return {"prId": pr["id"], "branch": branch, "title": pr["title"]}
+
+
 # -- identity, settings, audit ----------------------------------------------------
 
 

@@ -318,6 +318,25 @@ export const fetchReports = (p: string, range: string, types: string[], assignee
       (assignees.length ? `&assignees=${enc(assignees.join(","))}` : ""),
   );
 
+// -- code-change PRs (coding agent apply path) ---------------------------------------
+
+export interface CodePrResult {
+  prId: number;
+  branch: string;
+  title: string;
+}
+
+export const createCodePr = (
+  p: string,
+  repoId: string,
+  body: {
+    baseBranch: string;
+    title: string;
+    description?: string;
+    edits: { path: string; content: string }[];
+  },
+) => send<CodePrResult>(`/api/projects/${enc(p)}/repos/${enc(repoId)}/code-pr`, "POST", body);
+
 // -- copilot session history --------------------------------------------------------
 
 export interface CopilotSessionMeta {

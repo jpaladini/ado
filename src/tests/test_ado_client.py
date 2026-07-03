@@ -492,3 +492,53 @@ async def test_connection_data_sends_no_api_version():
     me = await c.connection_data()
     assert me == {"id": "u1", "displayName": "Jason"}
     assert "api-version" not in seen["params"]
+
+
+@pytest.mark.asyncio
+async def test_push_branch_with_edits_resolves_change_types():
+    """Existing file → 'edit', missing file → 'add'; branch created off base sha."""
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path.endswith("/refs"):
+            return httpx.Response(200, json={"value": [
+                {"name": "refs/heads/dev", "objectId": "abc123"}]})
+        if path.endswith("/items"):
+            # /exists.py is present on the branch; /new.py is not
+            if request.url.params.get("path") == "/exists.py":
+                return httpx.Response(200, json={"path": "/exists.py"})
+            return httpx.Response(404, json={})
+        if path.endswith("/pushes"):
+            import json as _json
+            captured["push"] = _json.loads(request.content)
+            return httpx.Response(201, json={"pushId": 9})
+        raise AssertionError(f"unexpected {path}")
+
+    c = ADOClient(org_url="https://dev.azure.com/myorg", pat="x")
+    c._client = lambda: httpx.AsyncClient(  # type: ignore[method-assign]
+        base_url=c.org_url, transport=httpx.MockTransport(handler))
+
+    out = await c.push_branch_with_edits(
+        "Demo", "r1", "dev", "copilot/fix-1", "fix things",
+        [{"path": "/exists.py", "content": "new"}, {"path": "/new.py", "content": "brand new"}],
+    )
+    assert out == {"pushId": 9}
+    push = captured["push"]
+    assert push["refUpdates"] == [{"name": "refs/heads/copilot/fix-1", "oldObjectId": "abc123"}]
+    changes = push["commits"][0]["changes"]
+    assert {c["item"]["path"]: c["changeType"] for c in changes} == {
+        "/exists.py": "edit", "/new.py": "add"}
+
+
+@pytest.mark.asyncio
+async def test_push_branch_with_edits_missing_base_branch():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"value": []})
+
+    c = ADOClient(org_url="https://dev.azure.com/myorg", pat="x")
+    c._client = lambda: httpx.AsyncClient(  # type: ignore[method-assign]
+        base_url=c.org_url, transport=httpx.MockTransport(handler))
+    with pytest.raises(ValueError, match="base branch 'ghost' not found"):
+        await c.push_branch_with_edits("Demo", "r1", "ghost", "b", "m",
+                                       [{"path": "/a", "content": "x"}])

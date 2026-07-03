@@ -507,3 +507,70 @@ async def test_get_flow_metrics_business_days_and_percentiles(monkeypatch):
     assert out["workloadByAssignee"] == {"Unassigned": 1}
     assert out["oldestOpenItems"][0]["ageBusinessDays"] == 4
     assert "business days" in out["note"]
+
+
+# ---- coding agent: create_code_pr verification + search_code dispatch -----------------
+
+
+@pytest.mark.asyncio
+async def test_create_code_pr_verification_rejects_bad_proposals(monkeypatch):
+    v = copilot._verify_write_target
+
+    assert "repositoryId" in await v("create_code_pr", {"edits": [{"path": "/a", "content": "x"}]}, "home")
+    assert "at least one edit" in await v(
+        "create_code_pr", {"repositoryId": "r1", "baseBranch": "dev", "edits": []}, "home"
+    )
+    assert "max 8" in await v(
+        "create_code_pr",
+        {"repositoryId": "r1", "baseBranch": "dev",
+         "edits": [{"path": f"/f{i}", "content": "x"} for i in range(9)]},
+        "home",
+    )
+    assert "starting with /" in await v(
+        "create_code_pr",
+        {"repositoryId": "r1", "baseBranch": "dev", "edits": [{"path": "no-slash", "content": "x"}]},
+        "home",
+    )
+    assert "too large" in await v(
+        "create_code_pr",
+        {"repositoryId": "r1", "baseBranch": "dev",
+         "edits": [{"path": "/big", "content": "x" * 150_001}]},
+        "home",
+    )
+
+
+@pytest.mark.asyncio
+async def test_create_code_pr_verifies_branch_exists(monkeypatch):
+    class FakeADO:
+        async def list_branches(self, project, repo_id):
+            return [{"name": "dev"}, {"name": "main"}]
+
+    monkeypatch.setattr(copilot, "ADOClient", FakeADO)
+    ok = await copilot._verify_write_target(
+        "create_code_pr",
+        {"repositoryId": "r1", "baseBranch": "dev", "edits": [{"path": "/a.py", "content": "x"}]},
+        "home",
+    )
+    assert ok is None  # valid proposal passes
+    bad = await copilot._verify_write_target(
+        "create_code_pr",
+        {"repositoryId": "r1", "baseBranch": "ghost", "edits": [{"path": "/a.py", "content": "x"}]},
+        "home",
+    )
+    assert "does not exist" in bad
+
+
+@pytest.mark.asyncio
+async def test_search_code_read_tool(monkeypatch):
+    async def fake_search(project, query, client):
+        return {"available": True, "indexedFiles": 42, "results": [
+            {"repo": "ado", "repoId": "r1", "branch": "dev", "path": "/src/x.py",
+             "nameHit": False, "matches": [{"line": 3, "text": "def x()"}]},
+        ]}
+
+    import app.codesearch as cs
+    monkeypatch.setattr(cs.code_search, "search", fake_search)
+    monkeypatch.setattr(copilot, "ADOClient", lambda: None)
+    out = await copilot._run_read_tool("search_code", {"query": "def x"}, "home")
+    assert out["results"][0]["repositoryId"] == "r1"
+    assert out["indexedFiles"] == 42

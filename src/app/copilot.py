@@ -246,6 +246,14 @@ READ_TOOLS: list[dict[str, Any]] = [
         {"question": {"type": "string", "description": "A self-contained analytics question."}},
         ["question"],
     ),
+    _schema(
+        "search_code",
+        "Full-text search across ALL repos' code (dev-or-default branch). Returns "
+        "matching files with line-numbered snippets. Use this to find where "
+        "something is implemented before reading files or proposing code changes.",
+        {"query": {"type": "string", "description": "Substring to find (case-insensitive)."}},
+        ["query"],
+    ),
 ]
 
 WRITE_TOOLS: list[dict[str, Any]] = [
@@ -290,6 +298,33 @@ WRITE_TOOLS: list[dict[str, Any]] = [
             "comment": {"type": "string"},
         },
         ["prId", "repositoryId", "path", "line", "comment"],
+    ),
+    _schema(
+        "create_code_pr",
+        "PROPOSE a code change as a new branch + pull request. Each edit is the "
+        "COMPLETE new content of one file (read the current file first with "
+        "get_file; never send fragments or diffs). Not executed immediately: the "
+        "user applies it, which creates the branch and opens the PR for human "
+        "review — the change NEVER lands on the base branch directly.",
+        {
+            "repositoryId": {"type": "string", "description": "From list_repos results — never guess."},
+            "baseBranch": {"type": "string", "description": "Branch to base on and target with the PR (usually dev)."},
+            "title": {"type": "string", "description": "PR title."},
+            "description": {"type": "string", "description": "PR description: what and why."},
+            "edits": {
+                "type": "array",
+                "description": "Files to add or fully replace.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string", "description": "Repo path starting with /."},
+                        "content": {"type": "string", "description": "The ENTIRE new file content."},
+                    },
+                    "required": ["path", "content"],
+                },
+            },
+        },
+        ["repositoryId", "baseBranch", "title", "edits"],
     ),
 ]
 
@@ -396,6 +431,20 @@ async def _run_read_tool(name: str, args: dict[str, Any], project: str) -> Any:
             "rows": (ans.get("rows") or [])[:50],
             "note": "Data is batch (refreshed daily / on demand), not real-time.",
         }
+    if name == "search_code":
+        from app.codesearch import code_search
+
+        out = await code_search.search(project, str(args["query"]), ADOClient())
+        if not out.get("available"):
+            return {"error": out.get("reason") or "code search unavailable"}
+        return {
+            "results": [
+                {"repo": r["repo"], "repositoryId": r["repoId"], "branch": r["branch"],
+                 "path": r["path"], "matches": r["matches"]}
+                for r in out["results"][:10]
+            ],
+            "indexedFiles": out.get("indexedFiles"),
+        }
     c = ADOClient()
     if name == "list_pr_files":
         return await c.pr_files(project, str(args["repositoryId"]), int(args["prId"]))
@@ -460,6 +509,12 @@ Rules:
 - Two data planes: read tools are LIVE; query_analytics_history is BATCH (Delta,
   refreshed daily). Use it for trends/history and say so when you do — never present
   batch numbers as real-time.
+- Code changes: search_code to locate the right files, get_file to read the CURRENT
+  content, then ONE create_code_pr proposal with the COMPLETE new content of each
+  changed file (never fragments — anything you omit is deleted). Base on and target
+  the repo's working branch (usually dev). Applying creates a branch + PR that CI
+  validates and a human reviews — never claim the change is merged or live; the PR
+  is the deliverable. Keep changes small: one concern per PR, max a handful of files.
 - Be concise. Answer in plain sentences; no markdown headers.
 """
 
@@ -480,6 +535,35 @@ async def _verify_write_target(name: str, args: dict[str, Any], project: str) ->
             return f"Could not verify work item {args['id']}: ADO returned {e.response.status_code}"
         except Exception as e:
             return f"Could not verify work item {args['id']}: {e}"
+
+    if name == "create_code_pr":
+        edits = args.get("edits") or []
+        if not args.get("repositoryId") or not args.get("baseBranch"):
+            return "create_code_pr needs repositoryId (from list_repos) and baseBranch."
+        if not edits:
+            return "create_code_pr needs at least one edit ({path, content})."
+        if len(edits) > 8:
+            return "Too many files in one proposal (max 8) — split the change into smaller PRs."
+        for e in edits:
+            if not isinstance(e, dict) or not str(e.get("path") or "").startswith("/"):
+                return "Every edit needs a repo path starting with / and full file content."
+            if len(str(e.get("content") or "")) > 150_000:
+                return f"{e.get('path')}: content too large for a proposal (150k chars max)."
+        try:
+            c = ADOClient()
+            branches = {b["name"] for b in await c.list_branches(project, str(args["repositoryId"]))}
+            if str(args["baseBranch"]) not in branches:
+                return (
+                    f"Branch '{args['baseBranch']}' does not exist in that repository — "
+                    "call list_branches and use a real branch (usually dev)."
+                )
+            return None
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                return "That repository does not exist — call list_repos and use a real id."
+            return f"Could not verify the repository: ADO returned {e.response.status_code}"
+        except Exception as e:
+            return f"Could not verify the code-change target: {e}"
 
     if name in ("comment_on_pr", "comment_on_pr_file"):
         if args.get("prId") is None or not args.get("repositoryId"):

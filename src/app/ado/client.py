@@ -476,6 +476,78 @@ class ADOClient:
             await asyncio.gather(*(fetch(p) for p in paths))
         return out
 
+    # -- code changes (branch + PR — the coding agent's write path) ---------------
+
+    async def push_branch_with_edits(
+        self,
+        project: str,
+        repo_id: str,
+        base_branch: str,
+        new_branch: str,
+        message: str,
+        edits: list[dict[str, str]],  # [{path, content}] — full-file replacements
+    ) -> dict[str, Any]:
+        """Create `new_branch` off `base_branch` with one commit containing the
+        edits (adds or full-file updates), via the Git pushes API. Never touches
+        the base branch — the change ships as a PR a human merges."""
+        proj, rid = quote(project, safe=""), quote(repo_id, safe="")
+        refs = await self._get(
+            f"/{proj}/_apis/git/repositories/{rid}/refs",
+            params={"filter": f"heads/{base_branch}"},
+        )
+        matches = [r for r in refs.get("value", []) if r["name"] == f"refs/heads/{base_branch}"]
+        if not matches:
+            raise ValueError(f"base branch '{base_branch}' not found")
+        base_sha = matches[0]["objectId"]
+
+        changes = []
+        for e in edits:
+            path = e["path"]
+            # changeType must match reality: edit for existing files, add for new
+            try:
+                await self._get(
+                    f"/{proj}/_apis/git/repositories/{rid}/items",
+                    params={
+                        "path": path,
+                        "versionDescriptor.version": base_branch,
+                        "versionDescriptor.versionType": "branch",
+                    },
+                )
+                change_type = "edit"
+            except httpx.HTTPStatusError as ex:
+                if ex.response.status_code != 404:
+                    raise
+                change_type = "add"
+            changes.append({
+                "changeType": change_type,
+                "item": {"path": path},
+                "newContent": {"content": e["content"], "contentType": "rawtext"},
+            })
+
+        return await self._post(
+            f"/{proj}/_apis/git/repositories/{rid}/pushes",
+            {
+                "refUpdates": [{"name": f"refs/heads/{new_branch}", "oldObjectId": base_sha}],
+                "commits": [{"comment": message, "changes": changes}],
+            },
+        )
+
+    async def create_pull_request(
+        self, project: str, repo_id: str, source_branch: str, target_branch: str,
+        title: str, description: str = "",
+    ) -> dict[str, Any]:
+        proj, rid = quote(project, safe=""), quote(repo_id, safe="")
+        pr = await self._post(
+            f"/{proj}/_apis/git/repositories/{rid}/pullrequests",
+            {
+                "sourceRefName": f"refs/heads/{source_branch}",
+                "targetRefName": f"refs/heads/{target_branch}",
+                "title": title,
+                "description": description,
+            },
+        )
+        return {"id": pr.get("pullRequestId"), "title": pr.get("title"), "status": pr.get("status")}
+
     # -- search -----------------------------------------------------------------
 
     async def search_pull_requests(self, project: str, query: str, top: int = 10) -> list[dict[str, Any]]:

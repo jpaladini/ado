@@ -127,6 +127,13 @@ API reads, Genie space creation) is allowed.
   `PlotFigure` (re-renders on resize + theme flip).
 - **Observability**: every model call traced to experiment 3567576457281688 with token
   usage; every AI/mutating action in `workspace.ado_companion_app.audit_log`.
+- **Coding agent (2026-07-03)**: copilot tools `search_code` (BFF grep index,
+  cross-repo) and `create_code_pr` (write PROPOSAL: full-file edits, verified
+  repo+branch, caps 8 files/150k chars). Apply → `POST …/repos/{rid}/code-pr`
+  → pushes API creates `copilot/<slug>-<hex>` branch off base + opens a PR into
+  it (audit `code.pr`). The validate pipeline is the CI; a human merges. Never
+  lands on the base branch directly. Verified live end-to-end (llama proposed,
+  apply created PR !29, then abandoned).
 - **Global search (2026-07-03)**: the header search box is real —
   `GET /api/projects/{p}/search?q=` returns work items (almsearch service, WIQL
   fallback) + code (BFF grep index in `app/codesearch.py`; the org has NO Code

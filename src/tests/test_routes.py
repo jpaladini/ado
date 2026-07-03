@@ -319,3 +319,54 @@ def test_table_export_route_validation():
     assert 'filename="t_x.xlsx"' in r.headers["content-disposition"]
     bad = client.post("/api/export/table", json={"name": "t", "columns": [], "rows": []})
     assert bad.status_code == 422
+
+
+# ---- code-change PR route ---------------------------------------------------------
+
+
+def test_code_pr_route_validation(ado):
+    base = "/api/projects/p/repos/r/code-pr"
+    assert client.post(base, json={"baseBranch": "dev", "title": " ", "edits": [
+        {"path": "/a", "content": "x"}]}).status_code == 422
+    assert client.post(base, json={"baseBranch": "dev", "title": "t", "edits": []}).status_code == 422
+    assert client.post(base, json={"baseBranch": "dev", "title": "t", "edits": [
+        {"path": "no-slash", "content": "x"}]}).status_code == 422
+
+
+def test_code_pr_route_happy_path(ado):
+    calls = {}
+
+    async def push(project, repo_id, base, branch, message, edits):
+        calls["push"] = (base, branch, message, edits)
+        return {"pushId": 1}
+
+    async def pr(project, repo_id, source, target, title, description=""):
+        calls["pr"] = (source, target, title)
+        return {"id": 55, "title": title, "status": "active"}
+
+    ado.push_branch_with_edits = push
+    ado.create_pull_request = pr
+    r = client.post("/api/projects/p/repos/r/code-pr", json={
+        "baseBranch": "dev", "title": "Fix the thing",
+        "edits": [{"path": "/src/x.py", "content": "print(1)\n"}],
+    })
+    assert r.status_code == 200
+    d = r.json()
+    assert d["prId"] == 55 and d["branch"].startswith("copilot/fix-the-thing-")
+    assert calls["push"][0] == "dev" and calls["pr"][1] == "dev"
+
+
+def test_code_pr_route_maps_missing_branch_to_422(ado):
+    async def push(*a, **kw):
+        raise ValueError("base branch 'ghost' not found")
+
+    ado.push_branch_with_edits = push
+    r = client.post("/api/projects/p/repos/r/code-pr", json={
+        "baseBranch": "ghost", "title": "t", "edits": [{"path": "/a", "content": "x"}]})
+    assert r.status_code == 422 and "ghost" in r.json()["detail"]
+
+
+def test_code_pr_audit_action():
+    from app.main import _action_name
+
+    assert _action_name("POST", "/api/projects/p/repos/r/code-pr") == "code.pr"
