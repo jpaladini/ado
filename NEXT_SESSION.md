@@ -209,6 +209,15 @@ The app is feature-complete through Phase 4C+4F:
   exports 100, codesearch 89). No CI coverage gate yet. Frontend has no automated tests
   (Playwright screenshots + live smokes per PR).
 
+**THE BACKLOG NOW LIVES ON THE ADO BOARD (2026-07-04, Jason's call).** Every roadmap
+item below was seeded as a work item in project `home` (Epics #5–#10 = themes:
+corporate rollout · CI-feedback loop · Genie Code bridge · blog · polish · open-source;
+Issues #11–#31 = the actionable cuts, each description pointing at its spec doc,
+priority 1–4, tagged). **Work the board, not this list**: pick a To Do item, move it
+Doing, reference it in the PR ("Fixes AB#<id>" in the PR description auto-links it),
+close it when the PR merges, and file NEW work as work items — dogfooding the app's
+own work-item CRUD. The list below stays as narrative context only.
+
 **Next up (nothing is blocking; pick by priority):**
 1. **Corporate rollout** — the whole point now. Follow `docs/CORPORATE_BOOTSTRAP.md`
    (8 ordered phases w/ gates). Corporate uses a ONE-TIME repo import (not the mirror).
@@ -338,6 +347,10 @@ curl -s -u ":$APAT" 'https://dev.azure.com/jpaladini85/home/_apis/build/builds?$
 
 ## 8. Working agreements with Jason
 
+- **The ADO board is the to-do list** (since 2026-07-04). Plans, fixes, and follow-ups
+  are work items in project `home`, parented under the theme Epics (#5–#10). Sessions
+  pick from To Do, move items through Doing → Done, put "AB#<id>" in PR descriptions
+  to auto-link, and file newly discovered work as new items instead of doc bullets.
 - **All changes through the trunk** — no manual deploys, no out-of-band edits.
 - Jason merges every PR into `dev`; agent creates PRs and watches builds.
 - Human-only actions (secrets/RBAC/merges/Genie sharing): give Jason a **ready-to-paste
