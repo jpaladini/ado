@@ -4,7 +4,7 @@ description: "Why we moved ADO Companion's AI out of the chat box and into the s
 date: 2026-07-03
 tags: [ai-agents, ux, azure-devops, databricks, llm, code-review, product]
 author: Jason Paladini
-draft: true
+draft: false
 series: "Building ADO Companion"
 part: 5
 ---

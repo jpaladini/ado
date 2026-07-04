@@ -4,7 +4,7 @@ description: "One day, three merged PRs: global search that greps the repos itse
 date: 2026-07-03
 tags: [ai-agents, search, azure-devops, databricks, mlflow, llm-evaluation, exports, product]
 author: Jason Paladini
-draft: true
+draft: false
 series: "Building ADO Companion"
 part: 7
 ---

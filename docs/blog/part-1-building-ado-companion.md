@@ -4,7 +4,7 @@ description: "How we designed, built, redesigned, and wired a full CI/CD path fo
 date: 2026-06-29
 tags: [databricks, azure-devops, react, fastapi, ci-cd, devops, asset-bundles, claude-code]
 author: Jason Paladini
-draft: true
+draft: false
 ---
 
 # Building ADO Companion

@@ -4,7 +4,7 @@ description: "Why we replaced 'chat with your data' with a tool-calling agent th
 date: 2026-07-02
 tags: [databricks, azure-devops, ai-agents, tool-calling, fmapi, genie, fastapi, llm]
 author: Jason Paladini
-draft: true
+draft: false
 series: "Building ADO Companion"
 part: 3
 ---

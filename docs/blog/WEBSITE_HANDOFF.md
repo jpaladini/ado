@@ -5,29 +5,32 @@
 > publishing instructions are up top; a **project-context appendix** (architecture,
 > delivery pipeline, auth model, per-post fact sheet) follows so you can write accurate
 > index blurbs, meta descriptions, and series copy without guessing. Written 2026-07-02,
-> expanded 2026-07-03.
+> expanded 2026-07-03 and 2026-07-04 (Part 8 added; all drafts flipped to prod).
 
 ## The task
 
 Add a **blog section** to the site (it currently has none — About / Experience /
-Platforms & Tools / What I Do / Education / Contact) and publish a **seven-part** technical
-series called **"Building ADO Companion."** The posts are finished drafts written in
-Jason's voice; your job is presentation and plumbing, **not rewriting**. Format-level
+Platforms & Tools / What I Do / Education / Contact) and publish an **eight-part** technical
+series called **"Building ADO Companion."** The posts are finished and written in
+Jason's voice; your job is presentation and plumbing, **not rewriting**.
+**As of 2026-07-04 Jason has flipped every post to `draft: false` — all eight are
+cleared for production publish** (screenshot slots stay hidden at render; see below). Format-level
 edits only. You MAY write short *around-the-posts* copy (index blurbs, a one-paragraph
 series intro, meta descriptions) — ground every claim in the appendix below, and keep
 Jason's direct, results-oriented voice.
 
-## The source files (7 posts + 2 images)
+## The source files (8 posts + 2 images)
 
 | File | Series part | Status |
 |---|---|---|
-| `part-1-building-ado-companion.md` | 1 — the app + CI/CD pipeline | draft, complete |
-| `part-2-analytics-odata.md` | 2 — choosing OData for analytics | draft, complete |
-| `part-3-ai-copilot-agent.md` | 3 — the AI copilot agent | draft, complete |
-| `part-4-mlflow-tracing-agent.md` | 4 — MLflow tracing | draft, complete |
-| `part-5-ai-in-the-flow-of-work.md` | 5 — in-place AI (enrichment, PR review, Explain) | draft, complete |
-| `part-6-flow-metrics-business-days.md` | 6 — Reports tab, business days, Observable Plot | draft, complete |
-| `part-7-search-artifacts-eval-harness.md` | 7 — global search, artifacts/exports, model eval harness | draft, complete |
+| `part-1-building-ado-companion.md` | 1 — the app + CI/CD pipeline | complete, `draft: false` |
+| `part-2-analytics-odata.md` | 2 — choosing OData for analytics | complete, `draft: false` |
+| `part-3-ai-copilot-agent.md` | 3 — the AI copilot agent | complete, `draft: false` |
+| `part-4-mlflow-tracing-agent.md` | 4 — MLflow tracing | complete, `draft: false` |
+| `part-5-ai-in-the-flow-of-work.md` | 5 — in-place AI (enrichment, PR review, Explain) | complete, `draft: false` |
+| `part-6-flow-metrics-business-days.md` | 6 — Reports tab, business days, Observable Plot | complete, `draft: false` |
+| `part-7-search-artifacts-eval-harness.md` | 7 — global search, artifacts/exports, model eval harness | complete, `draft: false` |
+| `part-8-pipeline-logs-board-as-todo.md` | 8 — CI logs in-app + the backlog moves onto the board | complete, `draft: false` |
 | `analytics-overview-light.png`, `analytics-overview-30d.png` | used by Part 2 | final |
 
 Canonical source of truth: the `docs/blog/` folder of Jason's `ado` repo (branch `dev`).
@@ -43,15 +46,16 @@ description: string
 date: YYYY-MM-DD
 tags: [string]
 author: Jason Paladini
-draft: true          # KEEP true until Jason explicitly flips it
+draft: false         # Jason flipped all posts to false on 2026-07-04 — cleared to publish
 series: "Building ADO Companion"   # parts 2-4 only; add to part 1 for consistency
 part: number
 ```
 
 Suggested `src/content/config.ts` schema: title, description, `date` as `z.coerce.date()`,
 tags as string array, `draft: z.boolean().default(true)`, optional `series` + `part`.
-**Respect `draft: true`** — exclude drafts from production builds; Jason flips them when
-he's reviewed the rendered result.
+**Respect the `draft` flag** — exclude any `draft: true` post from production builds.
+All eight posts currently ship `draft: false` (Jason's call, 2026-07-04); if a future
+post arrives `draft: true`, keep it out of prod until he flips it.
 
 ## Special content blocks — handle these deliberately
 
@@ -87,12 +91,13 @@ The posts contain three kinds of non-prose blocks:
   to its siblings (prev/next at minimum). Publication order = part order.
 - Tags can render as plain text chips; don't build tag pages unless it's trivial.
 - A simple `/blog` index (title, description, date, part badge) is enough. No pagination
-  needed for six posts.
+  needed for eight posts.
 
 ## What NOT to do
 
 - Don't rewrite, summarize, or "improve" the prose — voice is intentional.
-- Don't publish with `draft: true` still set, and don't flip drafts yourself.
+- Don't flip a `draft` flag in either direction yourself — the flags arrive as Jason
+  set them (all `false` as of 2026-07-04).
 - Don't strip the screenshot-slot markers from the *source* — only from rendered output.
 - Don't add an external comment system, analytics, or tracking as part of this task.
 
@@ -100,16 +105,16 @@ The posts contain three kinds of non-prose blocks:
 
 1. `/blog` index lists the series; each post renders with diagrams as images/SVG,
    syntax-highlighted code, hidden screenshot slots, working Part 2 images.
-2. Drafts are excluded from production; Jason can preview them (e.g. in dev mode or a
-   preview deploy) to review before flipping `draft`.
-3. Jason reviews rendered previews → captures the screenshots marked in the slots →
-   flips `draft: false` per post → publish.
+2. All eight posts are live in production (they ship `draft: false`); the draft-exclusion
+   machinery still exists for future posts.
+3. Screenshot slots stay hidden in rendered output; as Jason captures each set, the
+   images land in the source and replace their slots — no draft round-trip needed.
 
 ---
 
 # Appendix: project context (so your copy is accurate, not guessed)
 
-Everything below is factual as of 2026-07-03. Use it for blurbs, meta descriptions,
+Everything below is factual as of 2026-07-04. Use it for blurbs, meta descriptions,
 alt text, and a series intro. Do not contradict it; when a post and this appendix seem
 to disagree, the post wins (it's the reviewed artifact).
 
@@ -186,6 +191,7 @@ committed, so deploys need no Node toolchain.
 | 5 | Chat proved the AI; buttons shipped it | Form-as-approval-UX; PR review line anchors validated server-side (hallucinated anchors structurally impossible); Explain for non-engineers |
 | 6 | Flow metrics for a data team, in business days, drawn with d3's successor | p50/p85 over averages; aging-WIP-vs-p85; retired a custom Power BI semantic model with a 20-line tested function; Observable Plot (ISC, offline, token-themed); Databricks metric views verified as the future report-builder's semantic layer |
 | 7 | The search box was a div; and an eval harness so the model swap isn't vibes | global search over 3 planes (BFF grep — org lacks the Code Search extension, API fails silently with infoCode 6); session history persists proposal outcomes; fpdf2 over weasyprint (deploy failure mode); mlflow.genai.evaluate + judges, deterministic scorers as hard gate, one pinned judge |
+| 8 | CI logs land in-app (for humans AND the agent), and the backlog moves onto the board | build timeline + step logs in the Pipelines tab, failed step auto-opens; log truncation keeps the TAIL (tracebacks live at the end); `get_build_logs` copilot tool = the CI-feedback primitive; roadmap seeded as Epics/Issues (dogfooding); auto-close design: PR links work item + `transitionWorkItems` on human merge — outcome without granting the AI a close power |
 
 ## A6. Glossary (terms the posts assume)
 

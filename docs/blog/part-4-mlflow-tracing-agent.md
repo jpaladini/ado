@@ -4,7 +4,7 @@ description: "How we instrumented ADO Companion's tool-calling agent with MLflow
 date: 2026-07-02
 tags: [databricks, mlflow, tracing, observability, ai-agents, llmops, fmapi]
 author: Jason Paladini
-draft: true
+draft: false
 series: "Building ADO Companion"
 part: 4
 ---

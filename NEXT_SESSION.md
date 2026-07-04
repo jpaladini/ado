@@ -272,11 +272,15 @@ rate-limited to 0 there):
   code-agent quality delta to be the headline. A stronger model also earns a bigger `edits`
   budget (whole-file rewrites eat output tokens).
 
-**Blog**: Parts 1–7 drafted in `docs/blog/`, all `draft: true`, screenshot slots
-marked (1 build+CI/CD · 2 OData · 3 copilot · 4 MLflow tracing · 5 in-place AI ·
-6 flow metrics/business days/Plot · 7 search/artifacts/eval harness). `WEBSITE_HANDOFF.md` = self-contained publishing
-instructions for Jason's website agent (Astro + Tailwind site, minimalist B&W,
-jpaladini.vercel.app, no blog section yet). Jason has the handoff files in chat too.
+**Blog**: Parts 1–8 in `docs/blog/`, **all flipped to `draft: false` on 2026-07-04
+(Jason's call) — cleared for production publish**. Part 8 covers the pipeline-logs
+feature + the board-as-todo-list move. Screenshot slots still marked in-source
+(1 build+CI/CD · 2 OData · 3 copilot · 4 MLflow tracing · 5 in-place AI ·
+6 flow metrics/business days/Plot · 7 search/artifacts/eval harness · 8 pipeline
+logs/board); they hide at render and can land after publish. `WEBSITE_HANDOFF.md` =
+self-contained publishing instructions for Jason's website agent (Astro + Tailwind
+site, minimalist B&W, jpaladini.vercel.app, no blog section yet) — updated for Part 8
++ the flip. Board items: #23 (screenshots), #24 (publish).
 
 **Environments are fully separate — the dev PATs never reach corporate.** Corporate is a
 different Databricks workspace + ADO org with **its own PATs, service principals, and

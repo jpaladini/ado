@@ -4,7 +4,7 @@ description: "Building ADO Companion's Reports tab: which delivery metrics actua
 date: 2026-07-03
 tags: [analytics, flow-metrics, azure-devops, odata, observable-plot, d3, databricks, metric-views, dataviz]
 author: Jason Paladini
-draft: true
+draft: false
 series: "Building ADO Companion"
 part: 6
 ---

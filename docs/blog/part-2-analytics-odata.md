@@ -4,7 +4,7 @@ description: "A deep dive on sourcing data for the ADO Companion analytics dashb
 date: 2026-06-29
 tags: [azure-devops, analytics, odata, databricks, genie, dashboards, fastapi]
 author: Jason Paladini
-draft: true
+draft: false
 series: "Building ADO Companion"
 part: 2
 ---
