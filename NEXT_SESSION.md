@@ -220,18 +220,31 @@ The app is feature-complete through Phase 4C+4F:
    edits, ambiguous asks). The one coding task (`coding_agent_ci_pipeline`) currently
    passes 1.0 on llama ONLY because of the python-call parser (see §5c); add tasks that
    separate the models.
-3. **CI-feedback loop for the coding agent** (turns "writes a patch" into "gets it green"):
-   a read tool for its PR's build status + failure logs, and extending `create_code_pr` to
-   push follow-up commits to its own branch. Then: propose → PR → CI red → agent reads
-   traceback → pushes fix → CI green → human merges. Small, high-value.
-4. **Genie Code integration** (Databricks's own coding agent, launched 2026-03; UI-only,
+3. **Pipeline logs in the Pipelines tab (Jason's ask — HIGH interest).** Today the
+   Pipelines tab only lists builds (status/result). Expand it to **show the logs** so a
+   failed build is diagnosable IN the app — no jumping to the ADO UI. ADO Build API:
+   `GET /build/builds/{id}/timeline` (stages/jobs/steps tree with per-step `result` +
+   `log.id`), `GET /build/builds/{id}/logs` (log list), `GET /build/builds/{id}/logs/{logId}`
+   (plaintext log lines). UI: expand a build row → timeline tree → click a failed step →
+   its log (highlight errors). Add `client.get_build_timeline` + `get_build_log`, a route,
+   and a drawer/expander. **This is the same primitive item #4 (below) needs** — a
+   `get_build_logs` copilot read tool makes the coding agent able to read WHY its own PR's
+   build failed. Build both together: the human reads logs in the tab; the agent reads them
+   as a tool. This is the core of "run everything through this app" — pipeline triage
+   without leaving it.
+4. **CI-feedback loop for the coding agent** (turns "writes a patch" into "gets it green"):
+   builds on item #3's log primitives — a copilot read tool for its PR's build status +
+   failure logs, and extending `create_code_pr` to push follow-up commits to its own branch.
+   Then: propose → PR → CI red → agent reads traceback → pushes fix → CI green → human
+   merges. Small, high-value.
+6. **Genie Code integration** (Databricks's own coding agent, launched 2026-03; UI-only,
    NO API). Two paths documented in chat: (a) sync the ADO repo into a Databricks **Git
    folder** so Genie Code works the real code with COMPUTE (it can run tests); (b) expose
    ADO Companion as an **MCP server** so Genie Code drives our governed tools (business-day
    metrics, audit). Bridge, don't replace — our panel agent for in-flow changes, Genie Code
    for heavy dev. A `.assistant/skills/ado-companion/SKILL.md` (package AGENTS.md) would
    teach any Genie Code session this codebase.
-5. Small: CI coverage gate (optional); `db.py` DuckDB→warehouse port for streamlit-chess
+7. Small: CI coverage gate (optional); `db.py` DuckDB→warehouse port for streamlit-chess
    (ephemeral local file breaks on Apps — ideal coding-agent demo, do it PRE-demo);
    add a validate pipeline to streamlit-chess (agent already proposed one — abandoned PR).
 

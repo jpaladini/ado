@@ -207,6 +207,23 @@ the builder and code browser are the deepest cuts).
 4. **Bonus surfaces** — *Default: note Teams/M365 + Mac as optional P4; web (the Databricks
    App) is the product.*
 
+## 6a. Roadmap ahead (post-4; see NEXT_SESSION §5b for the ordered list)
+
+**North star (Jason, 2026-07-04): "run EVERYTHING through this app."** The app is the
+single pane — read/write ADO, analytics, and now code changes — so a user never leaves it
+to do their job. Concrete next cuts toward that:
+
+- **Pipelines tab → show logs.** Today it lists builds only. Add the ADO Build **timeline**
+  (`/build/builds/{id}/timeline` — stage/job/step tree with per-step result + `log.id`) and
+  **logs** (`/build/builds/{id}/logs/{logId}`, plaintext) so a failed build is diagnosable
+  IN the app. Same primitive feeds the coding agent (a `get_build_logs` read tool → it reads
+  why its own PR's build failed). Build the human view + the agent tool together.
+- **CI-feedback loop** for the coding agent (propose → PR → CI red → agent reads log →
+  pushes fix → green → human merges); needs the log primitive above + push-to-own-branch.
+- **Corporate rollout** with a Claude endpoint (`docs/CORPORATE_BOOTSTRAP.md`, model
+  comparison via `evals/README.md`) — model quality is the #1 coding-agent lever.
+- **Genie Code bridge** (Git folder sync and/or ADO Companion as an MCP server).
+
 ## 7. Databricks Free Edition constraints (dev only)
 
 Free Edition is great for prototyping; it is **not** a production backend.
