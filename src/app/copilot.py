@@ -180,6 +180,18 @@ READ_TOOLS: list[dict[str, Any]] = [
         [],
     ),
     _schema(
+        "get_build_logs",
+        "Diagnose one pipeline build: its stage/job/step timeline (with error "
+        "messages) plus the log TAIL of each failed step. Use after list_builds "
+        "to explain WHY a build failed — e.g. the validation build of a PR you "
+        "proposed. Pass logId to read one specific step's full log instead.",
+        {
+            "buildId": {"type": "integer", "description": "From list_builds — never guess."},
+            "logId": {"type": "integer", "description": "Optional: a specific step's logId from the timeline."},
+        },
+        ["buildId"],
+    ),
+    _schema(
         "get_analytics_summary",
         "Near-live aggregate: work item counts by state category, open and total counts.",
         {},
@@ -502,6 +514,32 @@ async def _run_read_tool(name: str, args: dict[str, Any], project: str) -> Any:
         return await c.list_pull_requests(project, status=args.get("status") or "active")
     if name == "list_builds":
         return await c.list_builds(project, top=min(int(args.get("top") or 25), 100))
+    if name == "get_build_logs":
+        build_id = int(args["buildId"])
+        if args.get("logId"):
+            return await c.get_build_log(project, build_id, int(args["logId"]), max_chars=5000)
+        records = await c.get_build_timeline(project, build_id)
+        timeline = [
+            {
+                "type": r["type"], "name": r["name"], "result": r["result"],
+                "state": r["state"], "logId": r["logId"],
+                **({"issues": r["issues"]} if r["issues"] else {}),
+            }
+            for r in records
+            if r["type"] in ("Stage", "Job", "Task")
+        ]
+        failed = [r for r in records if r["result"] == "failed" and r.get("logId") and r["type"] == "Task"]
+        logs = []
+        for r in failed[:2]:  # tool results are truncated at 6000 chars — keep tails tight
+            log = await c.get_build_log(project, build_id, r["logId"], max_chars=2000)
+            logs.append({"step": r["name"], "logId": r["logId"], "logTail": log["content"]})
+        return {
+            "buildId": build_id,
+            "timeline": timeline,
+            "failedStepLogs": logs,
+            "note": "logTail is the END of each failed step's log (tracebacks live there); "
+                    "pass logId to read more of one log.",
+        }
     raise ValueError(f"unknown read tool: {name}")
 
 
@@ -541,6 +579,9 @@ Rules:
   target the repo's working branch (usually dev). Applying creates a branch + PR that
   CI validates and a human reviews — never claim the change is merged or live; the PR
   is the deliverable. Keep changes small: one concern per PR, max a handful of files.
+- Failed builds: list_builds to find the build id, then get_build_logs to read the
+  failing step's log tail — quote the actual error when explaining a failure, and
+  use it to fix your own PR's validation build before proposing a follow-up change.
 - A proposal EXISTS only if you called the write tool in THIS conversation and its
   result said "proposed". Never tell the user a proposal or PR exists otherwise — if
   you described a change but have not called the tool yet, call it now. Never ask the

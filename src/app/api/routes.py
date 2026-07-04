@@ -93,6 +93,16 @@ async def builds(project: str, top: int = Query(25, le=100)) -> dict[str, object
     return {"value": await _call(lambda c: c.list_builds(project, top=top))}
 
 
+@router.get("/projects/{project}/builds/{build_id}/timeline")
+async def build_timeline(project: str, build_id: int) -> dict[str, object]:
+    return {"value": await _call(lambda c: c.get_build_timeline(project, build_id))}
+
+
+@router.get("/projects/{project}/builds/{build_id}/logs/{log_id}")
+async def build_log(project: str, build_id: int, log_id: int) -> dict[str, object]:
+    return await _call(lambda c: c.get_build_log(project, build_id, log_id))
+
+
 @router.get("/projects/{project}/repos")
 async def repos(project: str) -> dict[str, object]:
     return {"value": await _call(lambda c: c.list_repos(project))}

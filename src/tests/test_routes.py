@@ -389,3 +389,26 @@ def test_merge_route_happy_and_conflict(ado):
 
     from app.main import _action_name
     assert _action_name("POST", "/api/projects/p/repos/r/pullrequests/7/merge") == "pr.merge"
+
+
+# ---- build timeline + logs (pipeline diagnosis) ----------------------------------------
+
+
+def test_build_timeline_route(ado):
+    async def timeline(project, build_id):
+        return [{"id": "t1", "type": "Task", "name": "pytest", "buildId": build_id}]
+
+    ado.get_build_timeline = timeline
+    r = client.get("/api/projects/Demo/builds/99/timeline")
+    assert r.status_code == 200 and r.json()["value"][0]["buildId"] == 99
+
+
+def test_build_log_route(ado):
+    async def log(project, build_id, log_id):
+        return {"logId": log_id, "truncated": False, "content": "##[error]boom"}
+
+    ado.get_build_log = log
+    r = client.get("/api/projects/Demo/builds/99/logs/5")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["logId"] == 5 and "boom" in body["content"]

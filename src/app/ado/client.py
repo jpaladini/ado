@@ -74,6 +74,14 @@ class ADOClient:
             resp.raise_for_status()
             return resp.json()
 
+    async def _get_text(self, path: str, params: dict[str, Any] | None = None) -> str:
+        """GET an endpoint that answers plaintext (build logs), not JSON."""
+        params = {"api-version": API_VERSION, **(params or {})}
+        async with self._client() as client:
+            resp = await client.get(path, params=params, headers={"Accept": "text/plain"})
+            resp.raise_for_status()
+            return resp.text
+
     async def _post(self, path: str, body: dict[str, Any], params: dict[str, Any] | None = None) -> dict[str, Any]:
         params = {"api-version": API_VERSION, **(params or {})}
         async with self._client() as client:
@@ -370,6 +378,50 @@ class ADOClient:
                 }
             )
         return out
+
+    async def get_build_timeline(self, project: str, build_id: int) -> list[dict[str, Any]]:
+        """Stage/job/step tree for one build. Flat records with parentId links;
+        each may carry a log id and per-step issues (error/warning messages)."""
+        proj = quote(project, safe="")
+        data = await self._get(f"/{proj}/_apis/build/builds/{build_id}/timeline")
+        out = []
+        for r in data.get("records", []):
+            out.append(
+                {
+                    "id": r.get("id"),
+                    "parentId": r.get("parentId"),
+                    "type": r.get("type"),  # Stage | Phase | Job | Task | Checkpoint
+                    "name": r.get("name"),
+                    "state": r.get("state"),
+                    "result": r.get("result"),
+                    "order": r.get("order"),
+                    "startTime": r.get("startTime"),
+                    "finishTime": r.get("finishTime"),
+                    "errorCount": r.get("errorCount") or 0,
+                    "warningCount": r.get("warningCount") or 0,
+                    "logId": (r.get("log") or {}).get("id"),
+                    "issues": [
+                        {"type": i.get("type"), "message": i.get("message")}
+                        for i in (r.get("issues") or [])
+                        if i.get("message")
+                    ],
+                }
+            )
+        return sorted(out, key=lambda r: (r["order"] is None, r["order"] or 0))
+
+    async def get_build_log(
+        self, project: str, build_id: int, log_id: int, max_chars: int = MAX_FILE_CHARS
+    ) -> dict[str, Any]:
+        """Plaintext content of one build log. Long logs keep the TAIL — that's
+        where a failed step's traceback lives."""
+        proj = quote(project, safe="")
+        text = await self._get_text(f"/{proj}/_apis/build/builds/{build_id}/logs/{log_id}")
+        truncated = len(text) > max_chars
+        return {
+            "logId": log_id,
+            "truncated": truncated,
+            "content": text[-max_chars:] if truncated else text,
+        }
 
     # -- repos & commits ------------------------------------------------------
 

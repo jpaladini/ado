@@ -439,6 +439,24 @@ class _ReadFakeADO:
     async def list_builds(self, *a, **kw):
         self._rec("builds", *a, **kw); return []
 
+    async def get_build_timeline(self, *a, **kw):
+        self._rec("timeline", *a)
+        return [
+            {"id": "s1", "parentId": None, "type": "Stage", "name": "Build", "state": "completed",
+             "result": "failed", "logId": None, "errorCount": 1, "warningCount": 0, "issues": []},
+            {"id": "p1", "parentId": "s1", "type": "Phase", "name": "Job", "state": "completed",
+             "result": "failed", "logId": None, "errorCount": 0, "warningCount": 0, "issues": []},
+            {"id": "t1", "parentId": "p1", "type": "Task", "name": "pytest", "state": "completed",
+             "result": "failed", "logId": 5, "errorCount": 1, "warningCount": 0,
+             "issues": [{"type": "error", "message": "1 failed"}]},
+            {"id": "t2", "parentId": "p1", "type": "Task", "name": "checkout", "state": "completed",
+             "result": "succeeded", "logId": 4, "errorCount": 0, "warningCount": 0, "issues": []},
+        ]
+
+    async def get_build_log(self, *a, **kw):
+        self._rec("build_log", *a, **kw)
+        return {"logId": a[2], "truncated": False, "content": "##[error]assert 1 == 2"}
+
 
 @pytest.fixture
 def fake_ado(monkeypatch):
@@ -470,6 +488,27 @@ async def test_read_tool_dispatch_covers_ado_tools(fake_ado):
 
     with pytest.raises(ValueError):
         await copilot._run_read_tool("nope", {}, "home")
+
+
+@pytest.mark.asyncio
+async def test_get_build_logs_summarizes_failures(fake_ado):
+    out = await copilot._run_read_tool("get_build_logs", {"buildId": 99}, "home")
+    # Phases are dropped from the timeline the model sees
+    assert [t["type"] for t in out["timeline"]] == ["Stage", "Task", "Task"]
+    assert out["timeline"][1]["issues"] == [{"type": "error", "message": "1 failed"}]
+    # only the FAILED task's log was fetched, as a tail
+    assert out["failedStepLogs"] == [
+        {"step": "pytest", "logId": 5, "logTail": "##[error]assert 1 == 2"}
+    ]
+    log_calls = [c for c in fake_ado.calls if c[0] == "build_log"]
+    assert len(log_calls) == 1 and log_calls[0][1][2] == 5
+
+
+@pytest.mark.asyncio
+async def test_get_build_logs_direct_log_fetch(fake_ado):
+    out = await copilot._run_read_tool("get_build_logs", {"buildId": 99, "logId": 4}, "home")
+    assert out["logId"] == 4  # timeline not fetched in direct mode
+    assert not any(c[0] == "timeline" for c in fake_ado.calls)
 
 
 @pytest.mark.asyncio

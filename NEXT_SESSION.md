@@ -220,23 +220,19 @@ The app is feature-complete through Phase 4C+4F:
    edits, ambiguous asks). The one coding task (`coding_agent_ci_pipeline`) currently
    passes 1.0 on llama ONLY because of the python-call parser (see §5c); add tasks that
    separate the models.
-3. **Pipeline logs in the Pipelines tab (Jason's ask — HIGH interest).** Today the
-   Pipelines tab only lists builds (status/result). Expand it to **show the logs** so a
-   failed build is diagnosable IN the app — no jumping to the ADO UI. ADO Build API:
-   `GET /build/builds/{id}/timeline` (stages/jobs/steps tree with per-step `result` +
-   `log.id`), `GET /build/builds/{id}/logs` (log list), `GET /build/builds/{id}/logs/{logId}`
-   (plaintext log lines). UI: expand a build row → timeline tree → click a failed step →
-   its log (highlight errors). Add `client.get_build_timeline` + `get_build_log`, a route,
-   and a drawer/expander. **This is the same primitive item #4 (below) needs** — a
-   `get_build_logs` copilot read tool makes the coding agent able to read WHY its own PR's
-   build failed. Build both together: the human reads logs in the tab; the agent reads them
-   as a tool. This is the core of "run everything through this app" — pipeline triage
-   without leaving it.
-4. **CI-feedback loop for the coding agent** (turns "writes a patch" into "gets it green"):
-   builds on item #3's log primitives — a copilot read tool for its PR's build status +
-   failure logs, and extending `create_code_pr` to push follow-up commits to its own branch.
-   Then: propose → PR → CI red → agent reads traceback → pushes fix → CI green → human
-   merges. Small, high-value.
+3. ~~Pipeline logs in the Pipelines tab~~ **SHIPPED 2026-07-04 (this session's PR)**:
+   `client.get_build_timeline` + `get_build_log` (plaintext, keeps the TAIL when
+   truncating — tracebacks live there), routes `GET …/builds/{id}/timeline` +
+   `…/logs/{logId}`, Pipelines UI (expand a build row → stage/job/step tree with
+   durations + error badges → click a step → its log, `##[error]` lines red,
+   timestamps stripped; a failed build auto-opens its first failed step's log), and
+   the **`get_build_logs` copilot read tool** (timeline summary + failed-step log
+   tails; `logId` arg reads one specific log deeper).
+4. **CI-feedback loop for the coding agent** (turns "writes a patch" into "gets it
+   green"): the log primitive is DONE (item #3's `get_build_logs`). Remaining piece:
+   extend `create_code_pr` to push follow-up commits to the SAME `copilot/…` branch
+   (today every Apply makes a fresh branch+PR). Then: propose → PR → CI red → agent
+   reads traceback via get_build_logs → pushes fix → CI green → human merges.
 6. **Genie Code integration** (Databricks's own coding agent, launched 2026-03; UI-only,
    NO API). Two paths documented in chat: (a) sync the ADO repo into a Databricks **Git
    folder** so Genie Code works the real code with COMPUTE (it can run tests); (b) expose

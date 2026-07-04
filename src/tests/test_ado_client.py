@@ -59,6 +59,20 @@ ROUTES = {
             }
         ]
     },
+    ("GET", "/Demo/_apis/build/builds/99/timeline"): {
+        "records": [
+            {"id": "t1", "parentId": "j1", "type": "Task", "name": "pytest", "state": "completed",
+             "result": "failed", "order": 2, "errorCount": 1, "log": {"id": 5},
+             "issues": [{"type": "error", "message": "1 test failed"}, {"type": "warning"}]},
+            {"id": "s1", "parentId": None, "type": "Stage", "name": "Build", "state": "completed",
+             "result": "failed", "order": 1},
+            {"id": "t0", "parentId": "j1", "type": "Task", "name": "checkout", "state": "completed",
+             "result": "succeeded", "order": 1, "log": {"id": 4}},
+        ]
+    },
+    ("GET", "/Demo/_apis/build/builds/99/logs/5"): lambda req: httpx.Response(
+        200, text="collecting tests\n##[error]assert 1 == 2\n"
+    ),
     ("GET", "/Demo/_apis/git/repositories"): {
         "value": [{"id": "r1", "name": "core", "defaultBranch": "refs/heads/main"}]
     },
@@ -238,6 +252,26 @@ async def test_builds(client: ADOClient):
     b = (await client.list_builds("Demo"))[0]
     assert b["result"] == "succeeded"
     assert b["sourceBranch"] == "main"
+
+
+@pytest.mark.asyncio
+async def test_build_timeline(client: ADOClient):
+    recs = await client.get_build_timeline("Demo", 99)
+    assert [r["name"] for r in recs] == ["Build", "checkout", "pytest"]  # order-sorted
+    task = recs[-1]
+    assert task["logId"] == 5 and task["errorCount"] == 1
+    # message-less issues are dropped
+    assert task["issues"] == [{"type": "error", "message": "1 test failed"}]
+    assert recs[0]["logId"] is None
+
+
+@pytest.mark.asyncio
+async def test_build_log_keeps_tail_when_truncating(client: ADOClient):
+    log = await client.get_build_log("Demo", 99, 5)
+    assert log["truncated"] is False and "##[error]assert 1 == 2" in log["content"]
+    tail = await client.get_build_log("Demo", 99, 5, max_chars=20)
+    assert tail["truncated"] is True
+    assert tail["content"] == log["content"][-20:]  # tail, not head
 
 
 @pytest.mark.asyncio

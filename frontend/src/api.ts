@@ -185,6 +185,28 @@ export interface Build {
   sourceBranch: string;
 }
 
+export interface TimelineRecord {
+  id: string;
+  parentId: string | null;
+  type: string; // Stage | Phase | Job | Task | Checkpoint
+  name: string;
+  state: string | null;
+  result: string | null;
+  order?: number;
+  startTime?: string;
+  finishTime?: string;
+  errorCount: number;
+  warningCount: number;
+  logId: number | null;
+  issues: { type: string; message: string }[];
+}
+
+export interface BuildLog {
+  logId: number;
+  truncated: boolean;
+  content: string;
+}
+
 export interface Repo {
   id: string;
   name: string;
@@ -496,6 +518,10 @@ export const fetchPullRequests = (p: string, status = "active") =>
   get<{ value: PullRequest[] }>(`/api/projects/${enc(p)}/pullrequests?status=${status}`);
 export const fetchBuilds = (p: string) =>
   get<{ value: Build[] }>(`/api/projects/${enc(p)}/builds`);
+export const fetchBuildTimeline = (p: string, buildId: number) =>
+  get<{ value: TimelineRecord[] }>(`/api/projects/${enc(p)}/builds/${buildId}/timeline`);
+export const fetchBuildLog = (p: string, buildId: number, logId: number) =>
+  get<BuildLog>(`/api/projects/${enc(p)}/builds/${buildId}/logs/${logId}`);
 export const fetchRepos = (p: string) =>
   get<{ value: Repo[] }>(`/api/projects/${enc(p)}/repos`);
 export const fetchCommits = (p: string, repoId: string) =>
