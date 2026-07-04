@@ -150,7 +150,9 @@ the copilot's next turn (check the trace's endpoint attribute).
 - [ ] .xlsx and .pdf exports download
 - [ ] Copilot: proposal → Apply → audit row; session restores after reload
 - [ ] Ingest job scheduled (unpause it — G1 note) and freshness bar shows it
-- [ ] Both PATs rotated if they ever appeared in a transcript (house rule)
+- [ ] Corporate uses its OWN PATs/SPs/secrets (dev credentials never travel here —
+      promotion is a pure code merge); dev PATs are only an open-sourcing concern for
+      the dev repo, not this environment
 - [ ] `NEXT_SESSION.md` updated with corporate identifiers (new §3 table)
 
 **Order matters and the gates are the script.** If a gate fails, stop and fix —

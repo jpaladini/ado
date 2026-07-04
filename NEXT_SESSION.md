@@ -260,8 +260,17 @@ marked (1 build+CI/CD · 2 OData · 3 copilot · 4 MLflow tracing · 5 in-place 
 instructions for Jason's website agent (Astro + Tailwind site, minimalist B&W,
 jpaladini.vercel.app, no blog section yet). Jason has the handoff files in chat too.
 
-**Open-sourcing** remains a goal: keep AGENTS.md self-sufficient; never commit tokens;
-**rotate both PATs before going public** (they appeared in session transcripts).
+**Environments are fully separate — the dev PATs never reach corporate.** Corporate is a
+different Databricks workspace + ADO org with **its own PATs, service principals, and
+secrets** (per-workspace `ado` scope; see `docs/CORPORATE_BOOTSTRAP.md` Phase 2). Promotion
+is a **pure code merge** — no credentials travel. So:
+- The dev/Free-Edition PATs (Jason's personal ones, which have appeared in this session's
+  transcripts) are a concern **only for open-sourcing the dev repo** — rotate them before
+  the *dev repo/transcripts* go public. They have **zero bearing on the corporate deploy**.
+- Corporate provisions fresh PATs during bootstrap; nothing from dev is copied except code.
+
+**Open-sourcing** the dev repo remains a goal: keep AGENTS.md self-sufficient; never commit
+tokens; rotate the dev PATs before that repo goes public.
 
 ## 6. Architecture cheat sheet (where things live)
 
