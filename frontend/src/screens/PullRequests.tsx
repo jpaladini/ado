@@ -18,6 +18,7 @@ import { Drawer, INPUT } from "../components/Drawer";
 import { AIButton, useCopilotConfigured } from "../components/AIButton";
 import { IconCheck, IconChevron } from "../components/icons";
 import { prChip } from "../lib/tokens";
+import { renderMarkdown } from "../lib/markdown";
 import { useToast } from "../components/Toast";
 
 const STATUSES = ["active", "completed", "abandoned"] as const;
@@ -364,6 +365,13 @@ function PRDrawer({
           <ActionButtons project={project} pr={pr} approved={approved} onApproved={onApproved} />
         </span>
       </div>
+
+      {pr.description && (
+        <div
+          className="markdown mb-[14px] max-h-[220px] overflow-auto rounded-[8px] border border-line bg-surface-2 px-[14px] py-[10px] text-[12.5px] text-text-2"
+          dangerouslySetInnerHTML={{ __html: renderMarkdown(pr.description) }}
+        />
+      )}
 
       {review.isError && <ErrorMsg error={review.error} />}
       {reviewSummary && (

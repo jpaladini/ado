@@ -152,40 +152,22 @@ export default function Copilot({ project, panel = false }: { project: string; p
       )}
       <FreshnessBar />
 
-      {/* -------- session history bar -------- */}
+      {/* -------- session history: one compact row, list behind a dropdown -------- */}
       {((sessions.data?.value ?? []).length > 0 || turns.length > 0) && (
-        <div className="mt-[10px] flex flex-wrap items-center gap-[6px]">
+        <div className="mt-[8px] flex items-center justify-end gap-[6px]">
+          <SessionMenu
+            sessions={sessions.data?.value ?? []}
+            activeId={sessionId}
+            onPick={restore}
+            onDelete={removeSession}
+          />
           <button
             onClick={newChat}
-            className={`rounded-[7px] border px-[10px] py-[4px] text-[11.5px] ${
-              sessionId === null && turns.length === 0
-                ? "border-ink-bg bg-ink-bg font-semibold text-ink-fg"
-                : "border-border bg-surface font-medium text-text-3 hover:border-faint"
-            }`}
+            title="Start a new chat"
+            className="rounded-[7px] border border-border bg-surface px-[9px] py-[3px] text-[11px] font-medium text-text-3 hover:border-faint"
           >
-            + New chat
+            + New
           </button>
-          {(sessions.data?.value ?? []).slice(0, 8).map((s) => (
-            <span
-              key={s.id}
-              className={`group flex items-center gap-[6px] rounded-[7px] border px-[10px] py-[4px] text-[11.5px] ${
-                s.id === sessionId
-                  ? "border-ink-bg bg-ink-bg font-semibold text-ink-fg"
-                  : "border-border bg-surface font-medium text-text-3 hover:border-faint"
-              }`}
-            >
-              <button onClick={() => restore(s.id)} className="max-w-[180px] truncate" title={s.title}>
-                {s.title}
-              </button>
-              <button
-                onClick={() => removeSession(s.id)}
-                title="Delete this chat"
-                className={`${s.id === sessionId ? "text-ink-fg" : "text-faint"} opacity-40 hover:opacity-100`}
-              >
-                ×
-              </button>
-            </span>
-          ))}
         </div>
       )}
 
@@ -339,6 +321,64 @@ function AnswerView({
         />
       ))}
     </Card>
+  );
+}
+
+/** Session history as a dropdown — one slim row instead of a wall of chips. */
+function SessionMenu({
+  sessions,
+  activeId,
+  onPick,
+  onDelete,
+}: {
+  sessions: { id: string; title: string; updatedAt: string }[];
+  activeId: string | null;
+  onPick: (id: string) => void;
+  onDelete: (id: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const active = sessions.find((s) => s.id === activeId);
+  return (
+    <div className="relative min-w-0">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="flex max-w-[240px] items-center gap-[6px] rounded-[7px] border border-border bg-surface px-[9px] py-[3px] text-[11px] font-medium text-text-3 hover:border-faint"
+      >
+        <span className="truncate">{active ? active.title : "History"}</span>
+        <span className="flex-none text-faint">({sessions.length}) ▾</span>
+      </button>
+      {open && (
+        <div className="absolute right-0 top-[26px] z-30 max-h-[300px] w-[280px] overflow-auto rounded-[8px] border border-border bg-surface py-1 shadow-[0_8px_24px_rgba(0,0,0,.18)]">
+          {sessions.map((s) => (
+            <div
+              key={s.id}
+              className={`flex items-center gap-[6px] px-[10px] py-[5px] ${
+                s.id === activeId ? "bg-accent-tint" : "hover:bg-hover"
+              }`}
+            >
+              <button
+                onClick={() => {
+                  onPick(s.id);
+                  setOpen(false);
+                }}
+                className="min-w-0 flex-1 truncate text-left text-[12px] text-text-2"
+                title={s.title}
+              >
+                {s.title}
+              </button>
+              <button
+                onClick={() => onDelete(s.id)}
+                title="Delete this chat"
+                className="flex-none text-faint hover:text-danger"
+              >
+                ×
+              </button>
+            </div>
+          ))}
+          {!sessions.length && <div className="px-[10px] py-[6px] text-[11.5px] text-faint">No saved chats.</div>}
+        </div>
+      )}
+    </div>
   );
 }
 

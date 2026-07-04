@@ -306,6 +306,7 @@ class ADOClient:
                 {
                     "id": pr.get("pullRequestId"),
                     "title": pr.get("title"),
+                    "description": (pr.get("description") or "")[:4000],
                     "status": pr.get("status"),
                     "isDraft": pr.get("isDraft", False),
                     "createdBy": _user(pr.get("createdBy")),

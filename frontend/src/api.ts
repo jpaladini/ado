@@ -162,6 +162,7 @@ export interface PullRequest {
   repositoryId: string | null;
   sourceRef: string;
   targetRef: string;
+  description?: string;
   isApproved?: boolean; // ADO reviewer votes: ≥1 approve, nobody waiting/rejecting
   mergeStatus?: string; // "succeeded" = no conflicts
 }
