@@ -368,6 +368,38 @@ missing/ungranted (by design, non-fatal).
    skip-lists, capped). If the extension is ever installed, swap the module — the
    route contract stays. Note: this org's repos' *default* branch is a stale feature
    branch; the index prefers `dev`. Consider fixing the default branch in ADO.
+12. **`connectionData` is UNVERSIONED.** `GET /_apis/connectionData` returns **400** if
+   you send `api-version` — but the client stamps it on every request. This silently
+   broke PR Approve (it resolves the reviewer id through connectionData) and the app
+   footer's display name. `client.connection_data()` calls it WITHOUT the param. If you
+   add another unversioned endpoint, do the same.
+13. **Llama emits tool calls as text, two ways.** (a) flat `update_work_item(id=2, ...)`
+   and (b) **python-style with nested payloads and unquoted tokens** —
+   `create_code_pr(repositoryId=<bare GUID>, baseBranch=main, edits=[{...}])` — instead
+   of a structured tool_call. `copilot.py` has TWO fallback parsers: `_parse_text_tool_calls`
+   (flat) and `_lift_python_style_calls` (quote/depth-aware, handles the nested case). This
+   is the #1 coding-agent failure on llama and the strongest argument for a frontier model
+   in corporate. Malformed tool-arg JSON gets PRECISE feedback (re-send with `\n` escaping),
+   never a generic missing-fields error (that sent llama into apology spirals). The eval
+   task `coding_agent_ci_pipeline` guards this end-to-end.
+14. **Repo default-branch fix on import** (do it for every migrated repo). ADO's importer
+   preserves the source's default branch (often a stale `claude/…` branch). Create the real
+   trunk (`main`/`dev`) at the head, then PATCH the default — **GOTCHA: PATCH by repo NAME
+   returns 400; use the repo GUID.** The Code tab + search index follow `dev`-then-default,
+   so a bad default degrades both. Full steps in `docs/REPO_ONBOARDING_E2E.md`.
+15. **fpdf2 over weasyprint for PDF.** weasyprint needs system cairo/pango — a pip install
+   that fails at deploy time blocks EVERY future deploy, not just the PDF button. fpdf2 is
+   pure Python. Choose libraries by their deploy-time failure mode, not just features.
+16. **The copilot has NO merge tool, by design.** It proposes code (create_code_pr) → Apply
+   opens a PR → a HUMAN clicks Merge in the UI. `complete_pull_request` is only reachable
+   from the Merge button, which only shows when ADO reports the PR approved + conflict-free.
+   This preserves "the AI writes code; it cannot merge code" — the roadshow's spine. Do not
+   add a merge tool to the copilot.
+17. **Genie Code is UI-only (no API).** Databricks's own coding agent (launched 2026-03)
+   runs on workspace compute but can't be invoked programmatically from our app. Integration
+   paths: Git folder sync (Genie Code works the repo with compute) and/or expose ADO
+   Companion as an MCP server (Genie Code drives our governed tools). Our in-app copilot
+   stays FMAPI+tools with a Claude endpoint in corporate.
 
 ## Model eval harness (compare copilot endpoints before swapping)
 

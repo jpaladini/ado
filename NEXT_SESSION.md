@@ -1,9 +1,19 @@
 # NEXT_SESSION.md — session handoff & resume guide
 
 > **For the next Claude Code session (and for Jason).** This file captures the complete
-> working state as of **2026-07-03** so a fresh session can resume in minutes. Read this,
+> working state as of **2026-07-04** so a fresh session can resume in minutes. Read this,
 > then `AGENTS.md` (runbooks + operational rules), then `PLAN.md` (roadmap). Do not
 > re-derive or re-create any infrastructure listed here — it exists and works.
+>
+> **Doc map** (read in this order): `NEXT_SESSION.md` (this file — state + resume) →
+> `AGENTS.md` (runbooks, operational rules, eval harness) → `PLAN.md` (roadmap) →
+> for corporate rollout: `docs/CORPORATE_BOOTSTRAP.md` (8-phase ordered setup) +
+> `docs/REPO_ONBOARDING_E2E.md` (migrate a repo + coding-agent test) +
+> `evals/README.md` (Llama-vs-Claude model comparison).
+>
+> **The app is a full ADO client AND a coding agent now** — the copilot proposes code
+> changes across all repos that Apply into real PRs (validate pipeline = CI, human
+> merges). This is the roadshow story: *the AI writes code; it cannot merge code.*
 
 ---
 
@@ -50,8 +60,10 @@ Pipeline → `databricks bundle deploy` → live app.**
 | Analytics tables | `workspace.ado_analytics.work_items`, `workspace.ado_analytics.work_item_daily` |
 | Copilot endpoint (dev) | `databricks-llama-4-maverick` (Claude endpoints are rate-limited to 0 on Free Edition) |
 | MLflow experiment | `/Shared/ado-companion-copilot`, id `3567576457281688` (copilot turn traces) |
-| App-state store | `workspace.ado_companion_app` (`settings`, `audit_log`) — schema + grants exist |
-| ADO org / project / repo | `jpaladini85` / `home` / `ado` |
+| App-state store | `workspace.ado_companion_app` — tables `settings`, `audit_log`, `ai_sessions`, `saved_reports`, metric view `work_items_metrics` (all app-created on first use; schema + grants exist) |
+| Copilot eval experiment | `/Shared/ado-companion-evals`, id `1855387441328379` (one run per endpoint; llama baseline + coding task logged) |
+| ADO org / project / main repo | `jpaladini85` / `home` / `ado` |
+| Other repos in `home` | `ado_`, `ado_buddy`, `home`, and **`streamlit-chess`** (id `ca9000f4-b595-4b19-a023-98e2bcff33e4`, default branch `main`, imported 2026-07-03 from github.com/jpaladini/streamlit-chess as the coding-agent E2E target — Streamlit+DuckDB, no CI yet) |
 | ADO deploy branch | `dev` (protected; **only Jason merges PRs into it** — agent merge is classifier-blocked by design) |
 | GitHub repo | `jpaladini/ado`; mirror workflow `.github/workflows/mirror-to-ado.yml` |
 | Secrets (scope `ado`) | `ado_org_url`, `ado_pat`, `ado_project`(=home), `genie_space_id`, `copilot_endpoint`, `mlflow_experiment_id` — all set |
@@ -98,10 +110,76 @@ or SQL — he's fast with them):** secret writes, any RBAC/GRANT/permissions API
 completing/merging PRs, broad destructive ops. Everything else (job run-now, PR create,
 API reads, Genie space creation) is allowed.
 
-## 5. Current state (as of 2026-07-03 handoff)
+## 5. Current state (as of 2026-07-04 handoff)
 
-**Everything below is merged & deployed** (PR ledger: #6–#19, all completed; the
-2026-07-02/03 session shipped #9–#19). The app is feature-complete through Phase 4C+4F:
+**PR ledger: #6–#33 all merged & deployed; #35 open (small UI fixes, awaiting Jason's
+merge).** The 2026-07-03/04 marathon session shipped #21–#35. App last deployed
+`2026-07-04T01:06:03Z`, RUNNING. **167 pytest passing.** Every item below is LIVE unless
+marked "(PR #35, awaiting merge)".
+
+### 5a. What shipped THIS session (2026-07-03/04) — the big additions
+
+- **4E Report builder** (PR #21): UC **metric view** `work_items_metrics` (YAML versioned
+  in `src/app/reportbuilder.py`, app-creates it lazily via the warehouse → app SP owns it,
+  so CREATE OR REPLACE works on version bumps; if another principal owns it, `_ensure`
+  probes and uses it read-only). Builder UI on Reports: dims × measures × chart
+  (auto/bar/line/area/table) + **filter chips** per category dimension (values queried
+  from the view itself). Per-user saved reports in `saved_reports`. Endpoints
+  `GET /reports/builder/meta`, `POST /reports/builder/run`, `GET/PUT/DELETE /reports/saved`.
+  Batch plane (Delta) — the curated widgets stay near-live OData. Lead-time measures use a
+  SQL business-days closed form (epoch-Monday) tested equal to `business_days_between`.
+- **Global search** (PR #22 + PR search follow-up): the header box searches **work items**
+  (almsearch service, WIQL fallback) + **pull requests** (list active+completed, filter) +
+  **code** (BFF grep index `app/codesearch.py` — the org has NO Code Search extension, the
+  API returns count:0/infoCode:6 silently; see AGENTS rule 11). Each plane fails
+  independently. Results deep-link into the WI drawer / PR drawer / Code viewer. Index is
+  TTL-cached (300s), prefers `dev` branch, skips minified/lockfiles/binaries.
+- **Copilot session history** (PR #23): `ai_sessions` table (opaque `state` JSON = turns +
+  proposal outcomes), autosaved (debounced) after answered turns; restore/delete.
+  **UI is now a compact History (N) dropdown + New button** (PR #35 — was a chip wall).
+- **Reports exports** (PR #23/#24): `.xlsx` (5 sheets, openpyxl) + `.pdf` (A4, **fpdf2 —
+  pure Python, chosen over weasyprint to avoid system-lib deploy risk**) via
+  `GET /reports/export?format=`. Honors active filters.
+- **Copilot table artifacts** (PR #24): Genie (`query_analytics_history`) results with
+  columns+rows surface as reply `tables`; a download chip POSTs to
+  `POST /api/export/table` → xlsx.
+- **Model eval harness** (PR #24): `scripts/eval_copilot.py` + `evals/copilot_tasks.json`
+  (7 tasks). Runs the REAL agent loop through `mlflow.genai.evaluate()`, scored by
+  deterministic scorers (tool choice, proposal contract, **no-silent-writes invariant**,
+  step budget, latency) + **LLM judge** (per-task guidelines). One run per endpoint in
+  `/Shared/ado-companion-evals`. **This is the corporate model-comparison mechanism** —
+  see `evals/README.md`.
+- **Coding agent** (PR #30, hardened #32/#33): copilot tools `search_code` (cross-repo grep)
+  and `create_code_pr` (write PROPOSAL: full-file edits, verified repo+branch, ≤8 files/150k
+  chars). Apply → `POST /api/projects/{p}/repos/{rid}/code-pr` → pushes API creates
+  `copilot/<slug>-<hex>` branch off base + opens a PR (audit `code.pr`). **Never lands on a
+  protected branch directly.** Also `list_repos` is a copilot read tool now. Verified live
+  end-to-end (llama searched→read→proposed; Apply made real PRs, then abandoned).
+- **Copilot side panel** (PR #28): the copilot moved from its own tab into a **right panel**
+  (Genie/Cortex style), toggled by a header **Copilot** button, available on every tab,
+  stays mounted so chat survives closing. Left nav **collapses to a 58px icon rail**
+  (localStorage). The dedicated AI tab is gone; Reports moved under Insights.
+- **Working timeline** (PR #33): each answer carries `steps` (interleaved model *thinking* +
+  every tool call with compacted args + result preview + error flag). UI: familiar chips
+  collapsed, "show working (N steps)" expands the full plot; failures in red. Makes a
+  claimed-but-never-made proposal visible at a glance.
+- **PR approve + merge** (PR #27, #33): `connection_data()` no longer sends `api-version`
+  (connectionData is unversioned → 400 broke Approve). `list_pull_requests` now returns
+  `isApproved` (from ADO reviewer votes — ANY approver, ≥1 approve + nobody waiting/
+  rejecting) + `mergeStatus`. **Merge button** in the PR row/drawer appears only when
+  active + ADO-approved + no conflicts → `POST .../merge` completes the PR (ADO re-enforces
+  branch policies server-side; 409 on conflicts; audit `pr.merge`). **The copilot has NO
+  merge tool — merge is a human click, preserving "AI writes, human ships".**
+- **PR description** in the PR drawer, rendered as markdown (PR #35 — was missing).
+- **Docs shipped**: blog **Part 7** (`docs/blog/part-7-search-artifacts-eval-harness.md`,
+  draft), `docs/CORPORATE_BOOTSTRAP.md` (8-phase setup pre-script — corporate uses a
+  ONE-TIME repo import, NOT the GitHub mirror), `docs/REPO_ONBOARDING_E2E.md` (replay-verbatim
+  repo migration + coding-agent test), `evals/README.md` (model comparison runbook),
+  AGENTS.md rules 11 + eval-harness + corporate-bootstrap sections.
+
+### 5b. Baseline capabilities (shipped earlier, all live)
+
+The app is feature-complete through Phase 4C+4F:
 
 - **Tabs**: Overview (live OData aggregates) · Work Items (full CRUD, drawers, AI
   draft/improve buttons) · Pull Requests (detail drawer: files, difflib diffs, threads,
@@ -127,53 +205,54 @@ API reads, Genie space creation) is allowed.
   `PlotFigure` (re-renders on resize + theme flip).
 - **Observability**: every model call traced to experiment 3567576457281688 with token
   usage; every AI/mutating action in `workspace.ado_companion_app.audit_log`.
-- **Coding agent (2026-07-03)**: copilot tools `search_code` (BFF grep index,
-  cross-repo) and `create_code_pr` (write PROPOSAL: full-file edits, verified
-  repo+branch, caps 8 files/150k chars). Apply → `POST …/repos/{rid}/code-pr`
-  → pushes API creates `copilot/<slug>-<hex>` branch off base + opens a PR into
-  it (audit `code.pr`). The validate pipeline is the CI; a human merges. Never
-  lands on the base branch directly. Verified live end-to-end (llama proposed,
-  apply created PR !29, then abandoned).
-- **Global search (2026-07-03)**: the header search box is real —
-  `GET /api/projects/{p}/search?q=` returns work items (almsearch service, WIQL
-  fallback) + code (BFF grep index in `app/codesearch.py`; the org has NO Code
-  Search extension — see AGENTS rule 11). Results deep-link: work item → edit
-  drawer, code file → Code tab viewer (prefers `dev` branch). Planes fail
-  independently; index is TTL-cached (300s), skips minified/lockfiles/binaries.
-- **Tests**: 148 pytest, ~83% line coverage (routes 79, copilot 79, store 84,
-  insights 81, exports 100, codesearch 89). No CI coverage gate yet. Frontend has
-  no automated tests (Playwright screenshots + live smokes per PR).
+- **Tests**: **167 pytest**, ~83% line coverage (routes/copilot ~79, store 84, insights 81,
+  exports 100, codesearch 89). No CI coverage gate yet. Frontend has no automated tests
+  (Playwright screenshots + live smokes per PR).
 
-**Next up (agreed order):**
-1. ~~4E report builder~~ **SHIPPED 2026-07-03**: metric view
-   `workspace.ado_companion_app.work_items_metrics` (YAML in
-   `src/app/reportbuilder.py`, app-created lazily via the warehouse so the app SP
-   owns it and CREATE OR REPLACE works on version bumps); builder UI on Reports
-   (dims × measures × chart: auto/bar/line/area/table); per-user saved reports in
-   `ado_companion_app.saved_reports`; endpoints `GET /api/reports/builder/meta`,
-   `POST /api/reports/builder/run`, `GET/PUT/DELETE /api/reports/saved`; audit
-   actions `report.run/save/delete`. Lead-time measures use a SQL business-days
-   closed form (epoch-Monday method) tested equal to `business_days_between`.
-   Deferred: builder filter UI (backend already accepts parameterized filters).
-2. ~~Copilot session history~~ **SHIPPED 2026-07-03**: `ai_sessions` store table
-   (opaque `state` JSON: turns + proposal outcomes), routes
-   `GET/PUT /api/copilot/sessions` + `GET/DELETE /api/copilot/sessions/{id}`
-   (413 cap 400k chars), session-chip bar on the Copilot screen with autosave
-   (debounced, after answered turns), restore, and delete. Audit:
-   `copilot.session.save/delete`.
-3. ~~Excel export~~ **Reports .xlsx SHIPPED 2026-07-03** (`app/exports.py`, openpyxl;
-   `GET /api/projects/{p}/reports/export`, Export button honors filters).
-   Remaining: PDF (weasyprint needs system cairo/pango — VERIFY the Apps runtime
-   before adding the dependency; a broken pip install blocks deploys) and
-   copilot-artifact exports (e.g. Genie result → xlsx).
-4. Small: ~~row-click chevrons~~ · ~~route tests~~ · ~~builder filter UI~~ ·
-   ~~PDF export~~ (fpdf2) · ~~copilot table artifacts~~ · ~~model eval harness~~
-   — ALL SHIPPED 2026-07-03. Eval harness: `scripts/eval_copilot.py` +
-   `evals/copilot_tasks.json`, mlflow.genai.evaluate + judges, experiment
-   `/Shared/ado-companion-evals` (id 1855387441328379), llama baseline logged
-   (all scorers 1.0, latency mean ~7s). See AGENTS "Model eval harness".
-   Remaining small: CI coverage gate (optional); grow the eval suite; corporate
-   run vs `databricks-claude-sonnet-5` with a pinned judge.
+**Next up (nothing is blocking; pick by priority):**
+1. **Corporate rollout** — the whole point now. Follow `docs/CORPORATE_BOOTSTRAP.md`
+   (8 ordered phases w/ gates). Corporate uses a ONE-TIME repo import (not the mirror).
+   Then run the model comparison (`evals/README.md`): put a Claude endpoint
+   (**Sonnet 5 / Opus 4.8 / Fable 5** — whatever the corporate workspace serves) on
+   `copilot_endpoint` and eval Llama-vs-Claude with a pinned judge. **Model quality is
+   the #1 lever for the coding agent** (see §5c).
+2. **Grow the eval suite** before/with the model swap — add harder coding tasks (multi-file
+   edits, ambiguous asks). The one coding task (`coding_agent_ci_pipeline`) currently
+   passes 1.0 on llama ONLY because of the python-call parser (see §5c); add tasks that
+   separate the models.
+3. **CI-feedback loop for the coding agent** (turns "writes a patch" into "gets it green"):
+   a read tool for its PR's build status + failure logs, and extending `create_code_pr` to
+   push follow-up commits to its own branch. Then: propose → PR → CI red → agent reads
+   traceback → pushes fix → CI green → human merges. Small, high-value.
+4. **Genie Code integration** (Databricks's own coding agent, launched 2026-03; UI-only,
+   NO API). Two paths documented in chat: (a) sync the ADO repo into a Databricks **Git
+   folder** so Genie Code works the real code with COMPUTE (it can run tests); (b) expose
+   ADO Companion as an **MCP server** so Genie Code drives our governed tools (business-day
+   metrics, audit). Bridge, don't replace — our panel agent for in-flow changes, Genie Code
+   for heavy dev. A `.assistant/skills/ado-companion/SKILL.md` (package AGENTS.md) would
+   teach any Genie Code session this codebase.
+5. Small: CI coverage gate (optional); `db.py` DuckDB→warehouse port for streamlit-chess
+   (ephemeral local file breaks on Apps — ideal coding-agent demo, do it PRE-demo);
+   add a validate pipeline to streamlit-chess (agent already proposed one — abandoned PR).
+
+### 5c. The model story (critical for corporate — this is the roadshow's technical spine)
+
+The copilot plumbing is **model-agnostic**; the endpoint is a **secret** → swapping models
+needs **no redeploy**. On the dev **llama** endpoint (Free Edition; Claude endpoints
+rate-limited to 0 there):
+- Read/search/explain/analytics: **rock solid**.
+- Work-item write proposals: reliable.
+- **Code-change proposals (`create_code_pr`): fragile on llama.** It repeatedly emitted the
+  call as *python-style text* with unquoted GUIDs/branch names and a nested `edits` payload
+  instead of a structured tool call. Two fixes landed: (1) a **quote/depth-aware
+  python-call parser** (`_lift_python_style_calls` in `copilot.py`) that lifts exactly that
+  shape into a real proposal — the eval task went `proposal_contract` **0.0 → 1.0**; (2)
+  malformed-JSON tool args get **precise feedback** (re-send with `\n` escaping) instead of
+  a misleading missing-fields error. Jason's exact failing paste is a regression test.
+- **Conclusion**: whole-file faithfulness + traceback-reading is exactly where a frontier
+  Claude model separates from llama. Corporate should run the eval comparison and expect the
+  code-agent quality delta to be the headline. A stronger model also earns a bigger `edits`
+  budget (whole-file rewrites eat output tokens).
 
 **Blog**: Parts 1–7 drafted in `docs/blog/`, all `draft: true`, screenshot slots
 marked (1 build+CI/CD · 2 OData · 3 copilot · 4 MLflow tracing · 5 in-place AI ·
@@ -187,27 +266,39 @@ jpaladini.vercel.app, no blog section yet). Jason has the handoff files in chat 
 ## 6. Architecture cheat sheet (where things live)
 
 ```
-src/app/main.py            FastAPI app + pure-ASGI AuditMiddleware (logs mutations)
-src/app/api/routes.py      all /api endpoints (BFF)
-src/app/ado/client.py      operational plane: live ADO REST (httpx, PAT basic auth)
-src/app/ado/analytics.py   analytical plane: ADO Analytics OData ($apply, snapshots)
+src/app/main.py            FastAPI app + pure-ASGI AuditMiddleware; _ACTIONS maps routes→
+                           audit names (report.*, code.pr, pr.merge, copilot.session.*, …)
+src/app/api/routes.py      all /api endpoints (BFF): search, reports/builder, reports/export,
+                           export/table, copilot/sessions, code-pr, pullrequests/{id}/merge
+src/app/ado/client.py      operational plane: live ADO REST. NOTE: connection_data() sends
+                           NO api-version (connectionData is unversioned → 400). Has
+                           push_branch_with_edits + create_pull_request (coding agent),
+                           complete_pull_request (merge), search_work_items/pull_requests
+src/app/ado/analytics.py   analytical plane: ADO Analytics OData ($apply); business_days_between
+src/app/reportbuilder.py   4E: UC metric-view YAML (versioned here), build_query planner,
+                           lazy _ensure (CREATE OR REPLACE, read-only fallback if owned elsewhere)
+src/app/codesearch.py      BFF code-search grep index (TTL cache; org has no Code Search ext)
+src/app/exports.py         reports_workbook (xlsx), reports_pdf (fpdf2), table_workbook
 src/app/genie.py           Genie Conversation API client (space id from secret at runtime)
-src/app/copilot.py         AI copilot: FMAPI tool-calling agent loop, propose-then-apply,
-                           write-target verification, text-form call fallback, MLflow tracing
-src/app/ai.py              single-shot AI: suggest_work_item, review_pr (line validation),
-                           explain_file — shares copilot's endpoint/tracing plumbing
+src/app/copilot.py         AI copilot: FMAPI tool-calling loop, propose-then-apply, write-target
+                           verification, TEXT-FORM + PYTHON-STYLE call parsers (llama fallback),
+                           search_code/create_code_pr coding tools, steps timeline, MLflow tracing
+src/app/ai.py              single-shot AI: suggest_work_item, review_pr, explain_file
 src/app/insights.py        table freshness (DESCRIBE DETAIL) + ingest run-now
-src/app/store.py           Delta app-state store (settings, audit) — parameterized SQL,
-                           batched audit writes, graceful degradation, 120s re-probe
+src/app/store.py           Delta app-state store: settings, audit_log, ai_sessions,
+                           saved_reports — parameterized SQL, graceful degradation, re-probe
 src/app/identity.py        X-Forwarded-* header identity
 jobs/ingest_ado_analytics.py  OData → Delta job (explicit schemas! all-NULL gotcha)
-frontend/src/screens/      Overview, WorkItems, PullRequests, Pipelines, Code, Copilot, Reports
-frontend/src/components/   Shell, Drawer(+Field/Select), AIButton, PlotFigure, CodeBlock,
-                           FreshnessBar, UserFooter, Toast, ui, icons
-frontend/src/lib/          theme, tokens, text (html<->text), highlight (lazy hljs),
-                           markdown (safe mini-renderer), plot (lazy Observable Plot + palette)
-databricks.yml             Asset Bundle: app + secret resources + ingest job (dev/stg/prod targets)
+scripts/eval_copilot.py    model eval harness (mlflow.genai.evaluate + judges)
+evals/copilot_tasks.json   7-task eval suite (incl. coding_agent_ci_pipeline)
+frontend/src/screens/      Overview, WorkItems, PullRequests, Pipelines, Code, Copilot,
+                           Reports, ReportBuilder (Copilot has panel variant; no AI tab)
+frontend/src/components/   Shell (rail + right panel + search + Copilot toggle), SearchBox,
+                           Drawer, AIButton, PlotFigure, CodeBlock, FreshnessBar, Toast, ui, icons
+frontend/src/lib/          theme, tokens, text, highlight, markdown, plot
+databricks.yml             Asset Bundle: app + secret resources + ingest job (dev/stg/prod)
 azure-pipelines.yml        deploy on merge to dev/stg/prod (SP auth via pipeline variables)
+azure-pipelines-validate.yml  PR validation: npm build + pytest + bundle validate (no deploy)
 ```
 
 Design invariants: two data planes (operational never depends on analytical);

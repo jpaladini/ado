@@ -1,6 +1,14 @@
 # ADO — Azure DevOps Companion on Databricks Apps
 
 > Planning document. Architecture **locked** for the core stack; scope items in §6 still open.
+>
+> **STATUS 2026-07-04:** Phases 0–4 all shipped & deployed (PRs #6–#33; #35 open). The app
+> is a full ADO client + analytics + a **coding agent** (copilot proposes cross-repo code
+> changes → Apply opens PRs → human merges). 167 pytest. For the live state read
+> `NEXT_SESSION.md`; for the roadmap ahead read §6 here + `NEXT_SESSION.md` §5b "Next up".
+> The dominant next milestone is **corporate rollout** (`docs/CORPORATE_BOOTSTRAP.md`) with
+> a **Claude endpoint** (Sonnet 5 / Opus 4.8 / Fable 5) on `copilot_endpoint` — model
+> quality is the #1 lever for coding-agent reliability (see `NEXT_SESSION.md` §5c).
 
 ## 1. What we're building
 
