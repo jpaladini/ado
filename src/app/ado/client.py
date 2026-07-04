@@ -301,6 +301,7 @@ class ADOClient:
         )
         out = []
         for pr in data.get("value", []):
+            votes = [int(r.get("vote") or 0) for r in (pr.get("reviewers") or [])]
             out.append(
                 {
                     "id": pr.get("pullRequestId"),
@@ -313,9 +314,36 @@ class ADOClient:
                     "repositoryId": (pr.get("repository") or {}).get("id"),
                     "sourceRef": (pr.get("sourceRefName") or "").replace("refs/heads/", ""),
                     "targetRef": (pr.get("targetRefName") or "").replace("refs/heads/", ""),
+                    # ADO's approval state, not just ours: at least one approve
+                    # (10) or approve-with-suggestions (5), and nobody waiting/
+                    # rejecting. Branch policies still gate the actual completion.
+                    "isApproved": any(v >= 5 for v in votes) and all(v >= 0 for v in votes),
+                    "mergeStatus": pr.get("mergeStatus"),  # e.g. succeeded | conflicts
                 }
             )
         return out
+
+    async def complete_pull_request(
+        self, project: str, repo_id: str, pr_id: int, delete_source_branch: bool = True
+    ) -> dict[str, Any]:
+        """Complete (merge) a PR — a HUMAN-initiated action from the UI, never
+        the copilot's. ADO enforces branch policies at completion; failures
+        (required build, min reviewers) surface as errors, not silent skips."""
+        proj, rid = quote(project, safe=""), quote(repo_id, safe="")
+        pr = await self._get(f"/{proj}/_apis/git/repositories/{rid}/pullRequests/{pr_id}")
+        last_merge_source = (pr.get("lastMergeSourceCommit") or {}).get("commitId")
+        if not last_merge_source:
+            raise ValueError("PR has no merge source commit (still merging or conflicted)")
+        done = await self._send(
+            "PATCH",
+            f"/{proj}/_apis/git/repositories/{rid}/pullRequests/{pr_id}",
+            body={
+                "status": "completed",
+                "lastMergeSourceCommit": {"commitId": last_merge_source},
+                "completionOptions": {"deleteSourceBranch": delete_source_branch},
+            },
+        )
+        return {"id": done.get("pullRequestId"), "status": done.get("status")}
 
     # -- pipelines (builds) ---------------------------------------------------
 

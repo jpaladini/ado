@@ -162,7 +162,15 @@ export interface PullRequest {
   repositoryId: string | null;
   sourceRef: string;
   targetRef: string;
+  isApproved?: boolean; // ADO reviewer votes: ≥1 approve, nobody waiting/rejecting
+  mergeStatus?: string; // "succeeded" = no conflicts
 }
+
+export const mergePullRequest = (p: string, repoId: string, prId: number) =>
+  send<{ id: number; status: string }>(
+    `/api/projects/${enc(p)}/repos/${enc(repoId)}/pullrequests/${prId}/merge`,
+    "POST",
+  );
 
 export interface Build {
   id: number;

@@ -7,6 +7,7 @@ import {
   fetchPrThreads,
   fetchPullRequests,
   reviewPr,
+  mergePullRequest,
   setPullRequestStatus,
   votePullRequest,
   type PullRequest,
@@ -118,6 +119,8 @@ function usePrActions(project: string, pr: PullRequest, onApproved: () => void) 
     mutationFn: () => votePullRequest(project, repoId!, pr.id, 10),
     onSuccess: () => {
       onApproved();
+      // refetch so ADO's approval state lands and the Merge button appears
+      qc.invalidateQueries({ queryKey: ["prs", project] });
       toast(`PR !${pr.id} approved`);
     },
     // a silent failure looks like a dead button — always say what happened
@@ -131,7 +134,24 @@ function usePrActions(project: string, pr: PullRequest, onApproved: () => void) 
     },
     onError: (e) => toast(`Failed: ${(e as Error).message}`),
   });
-  return { vote, setStatusMut, busy: vote.isPending || setStatusMut.isPending, canAct: !!repoId };
+  const merge = useMutation({
+    mutationFn: () => mergePullRequest(project, repoId!, pr.id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["prs", project] });
+      toast(`PR !${pr.id} merged`);
+    },
+    // policy failures (required build, min reviewers) surface here from ADO
+    onError: (e) => toast(`Merge failed: ${(e as Error).message}`),
+  });
+  return {
+    vote,
+    setStatusMut,
+    merge,
+    busy: vote.isPending || setStatusMut.isPending || merge.isPending,
+    canAct: !!repoId,
+    // approved per ADO (any reviewer set counts) and mergeable (no conflicts)
+    canMerge: !!repoId && pr.status === "active" && !!pr.isApproved && pr.mergeStatus === "succeeded",
+  };
 }
 
 function ActionButtons({
@@ -145,9 +165,19 @@ function ActionButtons({
   approved: boolean;
   onApproved: () => void;
 }) {
-  const { vote, setStatusMut, busy, canAct } = usePrActions(project, pr, onApproved);
+  const { vote, setStatusMut, merge, busy, canAct, canMerge } = usePrActions(project, pr, onApproved);
   return (
     <>
+      {canMerge && (
+        <button
+          onClick={() => confirm(`Merge PR !${pr.id} into ${pr.targetRef}?`) && merge.mutate()}
+          disabled={busy}
+          title="Approved in ADO and free of conflicts — branch policies still apply on completion"
+          className="mr-[7px] rounded-[7px] bg-accent px-[12px] py-[6px] text-[11.5px] font-semibold text-white hover:bg-accent-hover disabled:opacity-50"
+        >
+          Merge
+        </button>
+      )}
       {canAct && pr.status === "active" && !approved && (
         <div className="flex gap-[7px]">
           <button

@@ -370,3 +370,22 @@ def test_code_pr_audit_action():
     from app.main import _action_name
 
     assert _action_name("POST", "/api/projects/p/repos/r/code-pr") == "code.pr"
+
+
+def test_merge_route_happy_and_conflict(ado):
+    async def ok(project, repo_id, pr_id, delete_source_branch=True):
+        return {"id": pr_id, "status": "completed"}
+
+    ado.complete_pull_request = ok
+    r = client.post("/api/projects/p/repos/r/pullrequests/7/merge")
+    assert r.status_code == 200 and r.json()["status"] == "completed"
+
+    async def conflicted(project, repo_id, pr_id, delete_source_branch=True):
+        raise ValueError("PR has no merge source commit (still merging or conflicted)")
+
+    ado.complete_pull_request = conflicted
+    r = client.post("/api/projects/p/repos/r/pullrequests/7/merge")
+    assert r.status_code == 409
+
+    from app.main import _action_name
+    assert _action_name("POST", "/api/projects/p/repos/r/pullrequests/7/merge") == "pr.merge"

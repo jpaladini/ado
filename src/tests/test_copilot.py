@@ -651,3 +651,46 @@ def test_compact_args_never_inlines_file_content():
         "edits": [{"path": "/a.py", "content": "x" * 50_000}],
     })
     assert "/a.py" in s and "xxx" not in s and len(s) <= 220
+
+
+JASON_PASTE = """create_code_pr(repositoryId=ca9000f4-b595-4b19-a023-98e2bcff33e4, baseBranch=main, title='CI: validate pipeline (install + syntax gate)', description='Adds azure-pipelines-validate.yml for PR validation', edits=[{'path': '/azure-pipelines-validate.yml', 'content': "trigger: none\\npool:\\n  vmImage: ubuntu-latest\\nsteps:\\n  - checkout: self\\n  - task: UsePythonVersion@0\\n    inputs:\\n      versionSpec: '3.11'\\n    displayName: Use Python 3.11\\n  - script: |\\n      set -euo pipefail\\n      pip install -r requirements.txt\\n    displayName: Install dependencies"}])
+
+Proposed a PR to streamlit-chess adding /azure-pipelines-validate.yml with CI validation (install + syntax gate). It awaits the user's approval."""
+
+
+def test_python_style_call_with_nested_edits_is_lifted():
+    """The exact text llama emitted in production (2026-07-03): a python-style
+    call with an UNQUOTED GUID, bare `main`, and a nested edits payload."""
+    cleaned, calls = copilot._parse_text_tool_calls(JASON_PASTE)
+    assert len(calls) == 1
+    fn = calls[0]["function"]
+    assert fn["name"] == "create_code_pr"
+    args = json.loads(fn["arguments"])
+    assert args["repositoryId"] == "ca9000f4-b595-4b19-a023-98e2bcff33e4"  # bare GUID → string
+    assert args["baseBranch"] == "main"  # bare token → string
+    assert args["edits"][0]["path"] == "/azure-pipelines-validate.yml"
+    assert "vmImage: ubuntu-latest" in args["edits"][0]["content"]
+    assert "create_code_pr(" not in cleaned  # stripped from visible text
+    assert "Proposed a PR" in cleaned  # prose remains
+
+
+@pytest.mark.asyncio
+async def test_python_style_call_becomes_real_proposal(monkeypatch):
+    responses = iter([
+        _mk_response(content=JASON_PASTE),  # no structured tool_calls at all
+        _mk_response(content="Summarized: proposal recorded."),
+    ])
+
+    async def fake_invoke(endpoint, messages, tools):
+        return next(responses)
+
+    class FakeADO:
+        async def list_branches(self, project, repo_id):
+            return [{"name": "main"}]
+
+    monkeypatch.setattr(copilot, "_invoke", fake_invoke)
+    monkeypatch.setattr(copilot, "ADOClient", FakeADO)
+    out = await copilot.chat("home", "add CI to streamlit-chess")
+    assert len(out["proposals"]) == 1
+    assert out["proposals"][0]["tool"] == "create_code_pr"
+    assert out["proposals"][0]["args"]["baseBranch"] == "main"

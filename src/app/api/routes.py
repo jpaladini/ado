@@ -824,6 +824,16 @@ async def vote_pull_request(
     return await _call(lambda c: c.set_pr_vote(project, repo_id, pr_id, reviewer_id, body.vote))
 
 
+@router.post("/projects/{project}/repos/{repo_id}/pullrequests/{pr_id}/merge")
+async def merge_pull_request(project: str, repo_id: str, pr_id: int) -> dict[str, object]:
+    """Human-clicked merge. ADO enforces branch policies at completion — an
+    unapproved or policy-failing PR errors here rather than merging."""
+    try:
+        return await _call(lambda c: c.complete_pull_request(project, repo_id, pr_id))
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+
 @router.patch("/projects/{project}/repos/{repo_id}/pullrequests/{pr_id}")
 async def set_pull_request_status(
     project: str, repo_id: str, pr_id: int, body: PrStatusBody

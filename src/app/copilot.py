@@ -655,13 +655,129 @@ _TEXT_CALL_RE = re.compile(rf"\b({_TOOL_NAME_ALT})\s*\(([^()]*)\)")
 _ARG_RE = re.compile(r"""(\w+)\s*=\s*("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|[^,()]+)""")
 
 
+def _scan_call_end(text: str, open_paren: int) -> int | None:
+    """Index just past the ')' matching text[open_paren], honoring quotes
+    (with backslash escapes) and nested (), [], {}. None if unbalanced."""
+    depth = 0
+    quote: str | None = None
+    i = open_paren
+    while i < len(text):
+        ch = text[i]
+        if quote:
+            if ch == "\\":
+                i += 2
+                continue
+            if ch == quote:
+                quote = None
+        elif ch in "\"'":
+            quote = ch
+        elif ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            depth -= 1
+            if depth == 0:
+                return i + 1
+        i += 1
+    return None
+
+
+def _split_top_level(s: str) -> list[str]:
+    """Split on commas at depth 0, quote-aware."""
+    parts, buf, depth, quote = [], [], 0, None
+    i = 0
+    while i < len(s):
+        ch = s[i]
+        if quote:
+            if ch == "\\":
+                buf.append(s[i:i + 2])
+                i += 2
+                continue
+            if ch == quote:
+                quote = None
+            buf.append(ch)
+        elif ch in "\"'":
+            quote = ch
+            buf.append(ch)
+        elif ch in "([{":
+            depth += 1
+            buf.append(ch)
+        elif ch in ")]}":
+            depth -= 1
+            buf.append(ch)
+        elif ch == "," and depth == 0:
+            parts.append("".join(buf))
+            buf = []
+        else:
+            buf.append(ch)
+        i += 1
+    if "".join(buf).strip():
+        parts.append("".join(buf))
+    return parts
+
+
+def _parse_python_call_kwargs(argstr: str) -> dict[str, Any] | None:
+    """kwargs of a python-style call. Values are python literals when they
+    parse (strings, numbers, lists, dicts — handles nested edits payloads);
+    bare tokens like `main` or a raw GUID become strings. None if any part
+    isn't key=value shaped."""
+    import ast
+
+    out: dict[str, Any] = {}
+    for part in _split_top_level(argstr):
+        part = part.strip()
+        if not part:
+            continue
+        m = re.match(r"^([A-Za-z_]\w*)\s*=\s*(.+)$", part, re.DOTALL)
+        if not m:
+            return None
+        key, raw = m.group(1), m.group(2).strip()
+        try:
+            out[key] = ast.literal_eval(raw)
+        except (ValueError, SyntaxError):
+            out[key] = raw.strip("\"'")  # bare token → string
+    return out or None
+
+
+def _lift_python_style_calls(text: str) -> tuple[str, list[dict[str, Any]]]:
+    """The heavier text-form fallback: `tool_name(key=value, ...)` with nested
+    literal payloads (the shape llama writes create_code_pr in when it gives up
+    on structured calls). Known tool names only; matched spans are stripped."""
+    names = sorted((t["function"]["name"] for t in ALL_TOOLS), key=len, reverse=True)
+    pattern = re.compile(r"\b(" + "|".join(re.escape(n) for n in names) + r")\s*\(")
+    calls: list[dict[str, Any]] = []
+    out: list[str] = []
+    pos = 0
+    while True:
+        m = pattern.search(text, pos)
+        if not m:
+            out.append(text[pos:])
+            break
+        end = _scan_call_end(text, m.end() - 1)
+        kwargs = (
+            _parse_python_call_kwargs(text[m.end():end - 1]) if end is not None else None
+        )
+        if kwargs is None:
+            out.append(text[pos:m.end()])
+            pos = m.end()
+            continue
+        out.append(text[pos:m.start()])
+        calls.append({
+            "id": f"pycall{len(calls)}",
+            "type": "function",
+            "function": {"name": m.group(1), "arguments": json.dumps(kwargs)},
+        })
+        pos = end
+    return "".join(out), calls
+
+
 def _parse_text_tool_calls(text: str) -> tuple[str, list[dict[str, Any]]]:
     """Llama-family models sometimes emit a tool call as plain text — e.g.
     `update_work_item(id=2, tags="triage")` — instead of a structured tool_call
     (typically the 2nd+ call in a multi-item request). Lift those into real tool
     calls so proposals aren't silently lost, and strip them (plus the stray
     'assistant' template token) from the visible text."""
-    calls: list[dict[str, Any]] = []
+    # python-call style first (handles nested edits payloads the flat regex can't)
+    text, calls = _lift_python_style_calls(text)
 
     def lift(m: re.Match) -> str:
         args: dict[str, Any] = {}

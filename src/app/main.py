@@ -20,6 +20,7 @@ _ACTIONS = [
     (re.compile(r"/workitems/\d+$"), "PATCH", "workitem.update"),
     (re.compile(r"/pullrequests/\d+/vote$"), "PUT", "pr.approve"),
     (re.compile(r"/pullrequests/\d+/threads$"), "POST", "pr.comment"),
+    (re.compile(r"/pullrequests/\d+/merge$"), "POST", "pr.merge"),
     (re.compile(r"/pullrequests/\d+$"), "PATCH", "pr.status"),
     (re.compile(r"/repos/[^/]+/code-pr$"), "POST", "code.pr"),
     (re.compile(r"^/api/genie/ask$"), "POST", "genie.ask"),

@@ -542,3 +542,23 @@ async def test_push_branch_with_edits_missing_base_branch():
     with pytest.raises(ValueError, match="base branch 'ghost' not found"):
         await c.push_branch_with_edits("Demo", "r1", "ghost", "b", "m",
                                        [{"path": "/a", "content": "x"}])
+
+
+@pytest.mark.asyncio
+async def test_list_pull_requests_computes_ado_approval():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"value": [
+            {"pullRequestId": 1, "title": "a", "status": "active", "mergeStatus": "succeeded",
+             "reviewers": [{"vote": 10}, {"vote": 0}]},
+            {"pullRequestId": 2, "title": "b", "status": "active", "mergeStatus": "succeeded",
+             "reviewers": [{"vote": 10}, {"vote": -5}]},  # someone is waiting → not approved
+            {"pullRequestId": 3, "title": "c", "status": "active", "mergeStatus": "conflicts",
+             "reviewers": []},  # nobody voted → not approved
+        ]})
+
+    c = ADOClient(org_url="https://dev.azure.com/myorg", pat="x")
+    c._client = lambda: httpx.AsyncClient(  # type: ignore[method-assign]
+        base_url=c.org_url, transport=httpx.MockTransport(handler))
+    prs = await c.list_pull_requests("Demo")
+    assert [p["isApproved"] for p in prs] == [True, False, False]
+    assert prs[2]["mergeStatus"] == "conflicts"
